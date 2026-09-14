@@ -300,11 +300,31 @@ def install_units(ctx: Ctx) -> tuple[bool, str]:
     return _exec_step(ctx, "install systemd user units", do)
 
 
+def cron_expr(frequency: str, time_str: str) -> str:
+    """Turn a (frequency, HH:MM) pair into a 5-field cron expression. Shared
+    logic with the dashboard's own live schedule-change endpoint (status-
+    dashboard-server.py duplicates this -- that script is deployed standalone
+    with no import path back into lib/)."""
+    try:
+        hh, mm = time_str.split(":")
+        hh, mm = int(hh) % 24, int(mm) % 60
+    except (ValueError, AttributeError):
+        hh, mm = 3, 0
+    if frequency == "weekly":
+        return f"{mm} {hh} * * 0"      # every Sunday
+    if frequency == "monthly":
+        return f"{mm} {hh} 1 * *"      # 1st of every month
+    if frequency == "yearly":
+        return f"{mm} {hh} 1 1 *"      # Jan 1st
+    return f"{mm} {hh} * * *"          # daily (also the fallback for a bad value)
+
+
 def install_cron(ctx: Ctx) -> tuple[bool, str]:
     def do(ctx):
         entries = []
         if ctx.profile.use_daily_routine:
-            entries.append("0 3 * * * " + str(Path.home() / ".local/bin/daily-routine.sh"))
+            expr = cron_expr(ctx.profile.daily_routine_frequency, ctx.profile.daily_routine_time)
+            entries.append(f"{expr} " + str(Path.home() / ".local/bin/daily-routine.sh"))
         if ctx.profile.use_duckdns:
             entries.append("*/5 * * * * " + str(Path.home() / ".local/bin/duckdns-update.sh"))
         if ctx.profile.use_wastebins:

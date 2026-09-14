@@ -34,7 +34,7 @@ class Profile:
     jellyfin_public_url: str = ""        # https://jellyfin.example.org ("" = skip)
     nextcloud_domain: str = ""
     immich_domain: str = ""
-    duckdns_domains: str = ""            # e.g. myname,mynameplex
+    duckdns_domains: str = ""            # e.g. myname,mynameplex,mynameseerr
     duckdns_token: str = ""
     # storage
     media_pool: str = "/mnt/storage"
@@ -55,6 +55,12 @@ class Profile:
     use_duckdns: bool = False
     use_wastebins: bool = True
     use_alerts: bool = False
+    # nightly self-heal schedule -- also changeable live from the dashboard
+    # (status-dashboard-server.py's /api/schedule), which rewrites the
+    # crontab directly; these fields are just what a fresh install seeds it
+    # with.
+    daily_routine_frequency: str = "daily"   # "daily" | "weekly" | "monthly" | "yearly"
+    daily_routine_time: str = "03:00"        # HH:MM, 24h
     # secrets
     nc_db_password: str = ""
     nc_admin_password: str = ""
@@ -97,6 +103,13 @@ class Profile:
                                      if self.duckdns_domains else "",
             "DUCKDNS_DOMAIN_PLEX": (self.duckdns_domains.split(",")[1].strip() + ".duckdns.org"
                                     if "," in self.duckdns_domains else ""),
+            # 3rd (optional) slot: "myname,mynameplex,mynameseerr" -- Seerr is
+            # on the same docker network as Caddy (unlike qBittorrent/Sonarr/
+            # Radarr/Prowlarr, which are deliberately loopback-only inside
+            # gluetun's netns and aren't safely reverse-proxyable without a
+            # bigger network redesign), so it's the one easy addition here.
+            "DUCKDNS_DOMAIN_SEERR": (self.duckdns_domains.split(",")[2].strip() + ".duckdns.org"
+                                     if self.duckdns_domains.count(",") >= 2 else ""),
             "DUCKDNS_TOKEN": self.duckdns_token,
             "MEDIA_POOL": pool,
             "NEXTCLOUD_DATA": self.nextcloud_data or f"{pool}/nextcloud-data",
@@ -123,7 +136,7 @@ class Profile:
     # ── yaml round-trip ──────────────────────────────────────────────────
     def to_yaml(self) -> str:
         d = {"meta": {"created": datetime.now(timezone.utc).isoformat(),
-                      "installer": "linux-media-setup-with-dash"}}
+                      "installer": "copperarch-media-setup"}}
         for f in self.__dataclass_fields__:
             d[f] = getattr(self, f)
         return yaml.safe_dump(d, sort_keys=False, default_flow_style=False)

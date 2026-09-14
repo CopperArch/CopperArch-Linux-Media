@@ -1,9 +1,11 @@
-# linux-media-setup-with-dash
+# CopperArch Media Server
 
 A graphical installer that reproduces a complete self-healing Linux home
 server — Docker media/VPN stacks, a desktop status dashboard with one-click
 repairs, and a nightly self-healing maintenance routine — on
 **Ubuntu/Debian, Fedora and Arch**.
+
+(Repo name `linux-media-setup-with-dash` kept as-is — this is the product name.)
 
 ## What it installs
 

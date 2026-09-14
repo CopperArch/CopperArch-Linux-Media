@@ -24,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from status_keys import load_env, load_netns
@@ -713,6 +713,66 @@ TS_RE = re.compile(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]\s*(.*)$")
 BANNER_RE = re.compile(r"^=+\s*(.+?)\s*=+$")
 
 
+def _read_daily_routine_schedule():
+    """Parse this user's own crontab for the daily-routine.sh line (status-
+    dashboard-server.py's set_daily_routine_schedule, or the installer's
+    install_cron step, both write it) -- returns (frequency, hh, mm) or None
+    if not set up yet. Reading the REAL crontab instead of trusting a
+    hardcoded constant is the whole point: that constant never reflected an
+    actual schedule change."""
+    try:
+        p = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001
+        return None
+    if p.returncode != 0:
+        return None
+    script = str(Path.home() / ".local/bin/daily-routine.sh")
+    for line in p.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.endswith(script) or "--quick" in stripped:
+            continue
+        parts = stripped.split()
+        if len(parts) < 5:
+            continue
+        mm, hh, dom, mon, dow = parts[:5]
+        try:
+            hh, mm = int(hh), int(mm)
+        except ValueError:
+            continue
+        if dom != "*" and mon != "*":
+            freq = "yearly"
+        elif dom != "*":
+            freq = "monthly"
+        elif dow != "*":
+            freq = "weekly"
+        else:
+            freq = "daily"
+        return freq, hh, mm
+    return None
+
+
+def _next_run_human(frequency, hh, mm):
+    now = datetime.now()
+    candidate = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if frequency == "weekly":
+        days_ahead = (6 - now.weekday()) % 7  # cron dow=0 (Sun); Sunday is weekday() 6
+        candidate += timedelta(days=days_ahead)
+        if candidate <= now:
+            candidate += timedelta(days=7)
+    elif frequency == "monthly":
+        candidate = candidate.replace(day=1)
+        if candidate <= now:
+            candidate = (candidate.replace(day=28) + timedelta(days=4)).replace(day=1)
+    elif frequency == "yearly":
+        candidate = candidate.replace(month=1, day=1)
+        if candidate <= now:
+            candidate = candidate.replace(year=candidate.year + 1)
+    else:
+        if candidate <= now:
+            candidate += timedelta(days=1)
+    return candidate.strftime("%Y-%m-%d %H:%M") + f" ({frequency})"
+
+
 def collect_daily_routine():
     logs = sorted(LOG_DIR.glob("daily-routine-*.log"))
     if not logs:
@@ -753,12 +813,20 @@ def collect_daily_routine():
 
     mtime = latest.stat().st_mtime
     age_h = (time.time() - mtime) / 3600.0
+    sched = _read_daily_routine_schedule()
+    if sched:
+        frequency, hh, mm = sched
+        next_run = _next_run_human(frequency, hh, mm)
+        schedule = {"frequency": frequency, "time": f"{hh:02d}:{mm:02d}"}
+    else:
+        next_run, schedule = DAILY_ROUTINE_NEXT_RUN, None
     return {
         "log": str(latest),
         "ran_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
         "age_hours": round(age_h, 1),
         "stale": age_h > 26,
-        "next_run": DAILY_ROUTINE_NEXT_RUN,
+        "next_run": next_run,
+        "schedule": schedule,
         "counts": counts,
         "entries": entries,
         "history": [p.name for p in logs[-7:]],

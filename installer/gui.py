@@ -31,7 +31,7 @@ BG, FG, ACCENT, INPUT = "#292c33", "#e8eaed", "#4f8cff", "#3a3f4b"
 class Wizard(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Linux Media Setup with Dashboard")
+        self.title("CopperArch Media Server")
         self.geometry("880x640")
         self.configure(bg=BG)
         self.profile: Profile | None = None
@@ -70,7 +70,7 @@ class Wizard(tk.Tk):
 
     # ── 1 welcome ────────────────────────────────────────────────────────
     def page_welcome(self):
-        self.header("Linux Media Setup with Dashboard")
+        self.header("CopperArch Media Server")
         self.para(
             "Sets up a full self-healing home-server, on Ubuntu/Debian, Fedora or Arch:\n\n"
             "   • Docker stacks — Plex, Jellyfin, Immich, Nextcloud, seerr,\n"
