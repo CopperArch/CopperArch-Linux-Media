@@ -18,7 +18,7 @@ domain: ""           # e.g. example.org (blank skips the public domains)
 jellyfin_public_url: ""
 nextcloud_domain: ""
 immich_domain: ""
-duckdns_domains: ""  # e.g. myname,mynameplex
+duckdns_domains: ""  # e.g. myname,mynameplex,mynameseerr (3rd/seerr slot optional)
 duckdns_token: ""
 
 media_pool: /mnt/storage

@@ -71,7 +71,7 @@ def _in(q, default="", secret=False):
 
 def main() -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="linux-media-setup-with-dash installer")
+    ap = argparse.ArgumentParser(description="CopperArch Media Server installer")
     ap.add_argument("--profile", type=Path, help="load a saved profile YAML")
     ap.add_argument("--dry-run", action="store_true", help="show what would happen")
     ap.add_argument("--yes", action="store_true", help="accept every prompt")

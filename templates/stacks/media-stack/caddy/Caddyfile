@@ -76,3 +76,23 @@ http://{{NEXTCLOUD_DOMAIN}} {
 		format console
 	}
 }
+
+# Seerr shares Caddy's own docker network (media-net), unlike qBittorrent/
+# Sonarr/Radarr/Prowlarr -- those are deliberately loopback-only inside
+# gluetun's network namespace (FIREWALL_INPUT_PORTS/127.0.0.1 bindings, see
+# the vpn-stack compose file), so they're NOT reverse-proxied here; doing
+# that safely would mean either routing Caddy's own public traffic through
+# the VPN tunnel too or opening those ports to the LAN, both real design
+# changes outside the scope of just adding a Caddy block.
+{{DUCKDNS_DOMAIN_SEERR}} {
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+	}
+	reverse_proxy overseerr:5055
+
+	encode gzip
+	log {
+		output stdout
+		format console
+	}
+}

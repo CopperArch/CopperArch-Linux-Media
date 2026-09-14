@@ -242,6 +242,63 @@ def fix_daily_routine_quick(args):
     return rc == 0, out[-4000:] or "daily routine (quick) complete"
 
 
+_SCHEDULE_FREQUENCIES = ("daily", "weekly", "monthly", "yearly")
+_TIME_RE = re.compile(r"^([01]?[0-9]|2[0-3]):([0-5][0-9])$")
+
+
+def _cron_expr(frequency, hh, mm):
+    if frequency == "weekly":
+        return f"{mm} {hh} * * 0"
+    if frequency == "monthly":
+        return f"{mm} {hh} 1 * *"
+    if frequency == "yearly":
+        return f"{mm} {hh} 1 1 *"
+    return f"{mm} {hh} * * *"
+
+
+def set_daily_routine_schedule(frequency, time_str):
+    """Live schedule change for the nightly self-heal routine, from the
+    dashboard -- rewrites just the daily-routine.sh line in this user's own
+    crontab (this server already runs as the desktop user, same as the
+    installer's own install_cron step -- no sudo/-u needed), leaving every
+    other cron entry (duckdns updater, wastebin emptier, gluetun rotate)
+    untouched."""
+    if frequency not in _SCHEDULE_FREQUENCIES:
+        return False, f"unknown frequency {frequency!r}"
+    m = _TIME_RE.match(time_str or "")
+    if not m:
+        return False, "time must be HH:MM (24h)"
+    hh, mm = m.group(1), m.group(2)
+    script = BIN / "daily-routine.sh"
+    if not script.exists():
+        return False, f"{script} not found -- is the daily routine installed?"
+    expr = _cron_expr(frequency, hh, mm)
+    rc, out = sh(["crontab", "-l"], timeout=15)
+    lines = out.splitlines() if rc == 0 else []
+    script_str = str(script)
+    new_line = f"{expr} {script_str}"
+    replaced = False
+    kept = []
+    for line in lines:
+        # Match the daily-routine.sh line specifically (not the --quick
+        # variant some fixes invoke ad hoc, and not any other script).
+        stripped = line.strip()
+        if stripped.endswith(script_str) and "--quick" not in stripped:
+            if not replaced:
+                kept.append(new_line)
+                replaced = True
+            continue
+        kept.append(line)
+    if not replaced:
+        kept.append(new_line)
+    new_crontab = "\n".join(kept).strip("\n") + "\n"
+    p = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True,
+                       text=True, timeout=15)
+    if p.returncode != 0:
+        return False, (p.stderr or p.stdout or "crontab install failed").strip()
+    return True, f"scheduled {frequency} at {hh}:{mm} (cron: {expr})"
+
+
 def fix_topgrade(args):
     """Claude Code / Claude Code Plugins / OpenCode only — apt/snap/firmware/
     containers are disabled in ~/.config/topgrade.toml since daily-routine.sh
@@ -487,6 +544,11 @@ class Handler(SimpleHTTPRequestHandler):
         if route == "/api/refresh":
             rc, out = recollect()
             return self._json(200, {"ok": rc == 0, "output": out[-500:]})
+
+        if route == "/api/schedule":
+            ok, msg = set_daily_routine_schedule(body.get("frequency", ""),
+                                                 body.get("time", ""))
+            return self._json(200 if ok else 400, {"ok": ok, "output": msg})
 
         if route != "/api/fix":
             return self._json(404, {"error": "not found"})

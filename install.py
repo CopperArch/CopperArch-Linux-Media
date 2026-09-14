@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""linux-media-setup-with-dash — graphical installer entry point.
+"""CopperArch Media Server (linux-media-setup-with-dash) — graphical installer entry point.
 
     python3 install.py            # GUI wizard (tkinter)
     python3 install.py --cli      # terminal installer
