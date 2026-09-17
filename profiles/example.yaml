@@ -1,4 +1,4 @@
-# Example profile for linux-media-setup-with-dash.
+# Example profile for CopperArch-Linux-Media.
 # Copy to my-profile.yaml, fill in, then:
 #   python3 install.py --cli --profile my-profile.yaml
 #
@@ -7,7 +7,7 @@
 # answer the prompts at install time instead.
 
 meta:
-  installer: linux-media-setup-with-dash
+  installer: CopperArch-Linux-Media
 
 user: yourname
 lan_ip: 192.168.1.50

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GUI installer (tkinter) for linux-media-setup-with-dash.
+"""GUI installer (tkinter) for CopperArch-Linux-Media.
 
 Wizard: welcome -> profile source -> questions -> accepts -> sudo -> live
 install log -> summary. Every system-changing step needs an explicit accept;

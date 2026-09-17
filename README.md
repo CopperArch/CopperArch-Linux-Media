@@ -5,7 +5,8 @@ server — Docker media/VPN stacks, a desktop status dashboard with one-click
 repairs, and a nightly self-healing maintenance routine — on
 **Ubuntu/Debian, Fedora and Arch**.
 
-(Repo name `linux-media-setup-with-dash` kept as-is — this is the product name.)
+Repo: `github.com/CopperArch/CopperArch-Linux-Media` (renamed from
+`linux-media-setup-with-dash` — old links redirect automatically).
 
 ## What it installs
 
