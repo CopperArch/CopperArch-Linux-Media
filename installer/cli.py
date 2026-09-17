@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI installer for linux-media-setup-with-dash.
+"""CLI installer for CopperArch-Linux-Media.
 
     python3 installer/cli.py                          # interactive questions
     python3 installer/cli.py --profile my.yaml        # install from a saved profile
