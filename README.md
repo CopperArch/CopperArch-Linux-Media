@@ -97,7 +97,9 @@ Notes:
    only. The AI chat panes (Claude Code, opencode, and the OpenRouter
    models) run under `tmux`, so closing the terminal dock only detaches the
    session instead of killing whatever the agent was doing — reopening the
-   same pane reattaches to it.
+   same pane reattaches to it. Drag (or double/triple-click) to highlight
+   text in a pane — it's copied straight to the desktop clipboard, even
+   while the agent has grabbed the mouse.
 3. **Nightly routine** — `daily-routine.sh` re-installs drifted dashboard
    units, re-applies gluetun iptables rules, verifies the docker log-cap
    policy, auto-updates the arr stack with verify+auto-rollback (including a
