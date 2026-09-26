@@ -22,6 +22,22 @@ cd "$HOME" || exit 1
 PROG="${1:-claude}"
 shift || true
 
+# Agent panes run real, possibly long fixes — closing the dock (width -> 0)
+# blanks the iframe, which drops ttyd's websocket and sends the child SIGHUP
+# (see status-dashboard's 2026-09-04 "off" fix). Running these under tmux
+# means that SIGHUP just detaches the tmux client; the session (and whatever
+# the agent is doing) keeps running headless, and reopening the same pane
+# reattaches to it instead of starting over. One session per agent id
+# (dash-claude, dash-opencode, dash-oa, ...) so different panes never share
+# state. DASHBOARD_PANE_TMUX guards against re-wrapping once we're already
+# the tmux-managed re-exec.
+AGENT_PANES=(claude opencode oa mm gpt gm hy ds)
+if [[ -z "${DASHBOARD_PANE_TMUX:-}" ]] && command -v tmux >/dev/null 2>&1 \
+   && printf '%s\n' "${AGENT_PANES[@]}" | grep -qx "$PROG"; then
+    export DASHBOARD_PANE_TMUX=1
+    exec tmux new-session -A -s "dash-$PROG" "$0" "$PROG" "$@"
+fi
+
 # Which local model the llm/askllm panes use. Override in the environment to
 # switch without editing this script.
 OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:3b}"

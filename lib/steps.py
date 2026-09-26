@@ -35,7 +35,10 @@ class Ctx:
 def base_packages(ctx: Ctx) -> list[str]:
     need = ["python3", "git", "curl", "jq", "cron", "htop", "rsync", "unzip"]
     if ctx.profile.use_dashboard:
-        need += ["tkinter", "xrandr"]
+        # tmux (2026-09-26): agent panes run under it so closing the dashboard's
+        # terminal dock detaches instead of killing whatever the pane was doing
+        # — see dashboard-pane.sh.
+        need += ["tkinter", "xrandr", "tmux"]
     if ctx.profile.use_daily_routine:
         need += ["smartmontools", "ncdu"]
     if ctx.profile.media_pool and "mergerfs" not in ctx.profile.media_pool:

@@ -290,8 +290,19 @@
     background:rgba(255,255,255,.03);border:1px solid transparent}
   .c.bad{background:rgba(244,82,59,.1);border-color:rgba(244,82,59,.3)}
   .c.warnish{background:rgba(227,160,8,.09);border-color:rgba(227,160,8,.26)}
+  .c.upd{background:rgba(240,180,40,.16);border-color:rgba(240,180,40,.4);cursor:pointer}
+  .c.upd:hover{background:rgba(240,180,40,.24)}
   .c .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
   .c .u{margin-left:auto;font-size:10px;color:var(--faint);white-space:nowrap;padding-left:4px}
+  #update-choice{position:fixed;z-index:60;background:var(--panel,#141a24);border:1px solid rgba(240,180,40,.5);
+    border-radius:8px;padding:10px 12px;font-size:12px;box-shadow:0 6px 24px rgba(0,0,0,.5);max-width:280px}
+  #update-choice .t{font-weight:600;margin-bottom:4px}
+  #update-choice .ids{color:var(--faint,#8a95a5);font-size:10.5px;margin-bottom:8px;word-break:break-all}
+  #update-choice .row{display:flex;gap:6px}
+  #update-choice button{flex:1;padding:5px 8px;border-radius:5px;border:1px solid var(--edge,#2a3441);
+    background:rgba(255,255,255,.05);color:inherit;cursor:pointer;font-size:11.5px}
+  #update-choice button.go{background:rgba(240,180,40,.25);border-color:rgba(240,180,40,.5)}
+  #update-choice button:hover{filter:brightness(1.2)}
 
   /* cores */
   .cores{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:3px;margin-top:5px}
@@ -409,6 +420,8 @@
       </div>
     </div>
   </div>
+
+  <div id="update-choice" style="display:none"></div>
 
   <div id="overlay">
     <div class="sheet">
@@ -867,6 +880,8 @@ const FIX_INFO = {
   daily_routine_quick:"Running the quick pass of the nightly daily-routine script.",
   restart_unit:       "Restarting the systemd --user unit.",
   topgrade:           "Updating Claude Code, its plugins, and OpenCode via topgrade.",
+  docker_update_apply:"Recreating the container with the already-pulled newer image. If it's gluetun, the 7 containers sharing its network namespace are recreated together too.",
+  docker_update_skip: "Marking this image version as skipped — it won't be flagged again unless an even newer one shows up.",
 };
 
 let fixing = false;
@@ -1017,20 +1032,26 @@ function renderThermal(d){
   $("thermal").innerHTML = out;
 }
 
+let _dockerByName = {};
 function renderDocker(d){
   const k=d.docker||{};
   if(k.error){ $("docker").innerHTML=`<div class="empty">${esc(k.error)}</div>`; return; }
   $("docker-tag").textContent = `${k.running}/${k.total} running`;
   const list=(k.containers||[]);
+  _dockerByName = Object.fromEntries(list.map(c=>[c.name, c]));
   let out = `<div class="cgrid">`;
   for(const c of list){
     const bad = c.state!=="running" || c.health==="unhealthy";
     const warnish = c.health==="starting" || (c.restarts>=5);
     const dot = bad? "f" : warnish? "w" : (c.state==="running"? "" : "i");
-    const detail = c.state!=="running" ? c.state
+    const upd = !!c.update_available;
+    const detail = upd ? "update available"
+                 : c.state!=="running" ? c.state
                  : c.cpu!=null ? `${c.cpu.toFixed(0)}% · ${(c.mem||"").split(" / ")[0]}`
                  : c.since;
-    out += `<div class="c ${bad?"bad":warnish?"warnish":""}" title="${esc(c.image)} — ${esc(c.status)}">
+    const cls = bad?"bad":warnish?"warnish":upd?"upd":"";
+    const title = `${esc(c.image)} — ${esc(c.status)}` + (upd?" — click to update or skip":"");
+    out += `<div class="c ${cls}" title="${title}"${upd?` data-updname="${esc(c.name)}"`:""}>
               <span class="dot ${dot}"></span>
               <span class="n">${esc(c.name)}</span>
               <span class="u">${esc(detail)}</span>
@@ -1039,6 +1060,42 @@ function renderDocker(d){
   out += `</div>`;
   $("docker").innerHTML = out;
 }
+
+// Amber "update available" bubble -> a small popover with Update/Skip,
+// positioned by the bubble that was clicked. Added 2026-09-26: containers
+// with no automated verify+rollback path are pulled+flagged nightly but
+// never auto-applied — see docker-update-gate.py and daily-routine.sh §11.
+$("docker").addEventListener("click", (e) => {
+  const el = e.target.closest(".c.upd");
+  if(!el) return;
+  const name = el.dataset.updname;
+  const c = _dockerByName[name];
+  const info = (c && c.update_info) || {};
+  const pop = $("update-choice");
+  pop.innerHTML = `
+    <div class="t">Update available: ${esc(name)}</div>
+    <div class="ids">${esc(info.old_image_id||"?")} → ${esc(info.new_image_id||"?")}${
+      name==="gluetun" ? "<br>Recreates the whole VPN network namespace (7 containers) briefly." : ""}</div>
+    <div class="row">
+      <button class="go" id="uc-update">Update</button>
+      <button id="uc-skip">Skip</button>
+      <button id="uc-cancel">Cancel</button>
+    </div>`;
+  const r = el.getBoundingClientRect();
+  pop.style.left = Math.min(r.left, window.innerWidth-296) + "px";
+  pop.style.top = (r.bottom + 6) + "px";
+  pop.style.display = "block";
+  const hide = () => { pop.style.display = "none"; };
+  $("uc-cancel").onclick = hide;
+  $("uc-update").onclick = () => { hide(); runFixes(
+    [{id:"docker_update_apply", label:`Update ${name}`, args:{name}}], "Container update", null); };
+  $("uc-skip").onclick = () => { hide(); runFixes(
+    [{id:"docker_update_skip", label:`Skip update for ${name}`, args:{name}}], "Skip update", null); };
+});
+document.addEventListener("click", (e) => {
+  const pop = $("update-choice");
+  if(pop.style.display!=="none" && !pop.contains(e.target) && !e.target.closest(".c.upd")) pop.style.display="none";
+});
 
 function renderDisks(d){
   const fs=((d.disks||{}).filesystems)||[];

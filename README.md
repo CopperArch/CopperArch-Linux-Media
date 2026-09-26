@@ -91,21 +91,31 @@ Notes:
    the collector runs every 60s from a timer.
 2. **Dashboard repairs** — the web dashboard exposes a closed whitelist of
    fixes (container start/restart, VPN recreate/rotate, Prowlarr test-all,
-   Cloudflare-ban unblock, apt upgrade, quick routine). Guards: loopback
-   binding, `Sec-Fetch-Site`/Origin CSRF checks, 64 KB body cap, confirmed
-   reboot endpoint, argv-list execution only.
+   Cloudflare-ban unblock, apt upgrade, quick routine, container-update
+   apply/skip). Guards: loopback binding, `Sec-Fetch-Site`/Origin CSRF
+   checks, 64 KB body cap, confirmed reboot endpoint, argv-list execution
+   only. The AI chat panes (Claude Code, opencode, and the OpenRouter
+   models) run under `tmux`, so closing the terminal dock only detaches the
+   session instead of killing whatever the agent was doing — reopening the
+   same pane reattaches to it.
 3. **Nightly routine** — `daily-routine.sh` re-installs drifted dashboard
    units, re-applies gluetun iptables rules, verifies the docker log-cap
-   policy, auto-updates the arr stack with verify+auto-rollback, and runs
-   `media-stack-selfheal.py` (qBittorrent queue + dead-torrent recovery).
-   VPN IP rotation retries up to 3 restarts before giving up (a single bad
-   exit node used to leave the tunnel dead for hours), and both it and the
-   hourly `gluetun-rotate.sh` cron alert by email (`send-alert.py`, debounced
-   so a prolonged outage sends one mail, not one an hour) if the tunnel
-   won't come back — `media-stack-selfheal.py` also checks the tunnel
-   directly (`vpn_tunnel_health()`) rather than trusting gluetun's Docker
-   healthcheck, which stays "healthy" even when OpenVPN is stuck failing
-   auth in a loop.
+   policy, auto-updates the arr stack with verify+auto-rollback (including a
+   60-day cap so a hard-pinned tag or a remembered-bad image is never
+   skipped forever), and runs `media-stack-selfheal.py` (qBittorrent queue +
+   dead-torrent recovery). Everything else (Immich, Portainer, Tugtainer,
+   WatchState, Caddy, gluetun, Prowlarr's own dependency `flaresolverr`) is
+   pulled and checked nightly by `docker-update-gate.py` but never
+   auto-applied — a genuinely newer image just flags an amber "update
+   available" bubble on the dashboard, and you choose Update or Skip from
+   there. VPN IP rotation retries up to 3 restarts before giving up (a
+   single bad exit node used to leave the tunnel dead for hours), and both
+   it and the hourly `gluetun-rotate.sh` cron alert by email
+   (`send-alert.py`, debounced so a prolonged outage sends one mail, not one
+   an hour) if the tunnel won't come back — `media-stack-selfheal.py` also
+   checks the tunnel directly (`vpn_tunnel_health()`) rather than trusting
+   gluetun's Docker healthcheck, which stays "healthy" even when OpenVPN is
+   stuck failing auth in a loop.
 
 ## Repository layout
 
@@ -122,6 +132,7 @@ templates/              # your exact system, templatized
   bin/ttyd              # static terminal binary
   daily-routine.sh      # nightly self-healing routine
   media-stack-*.py      # self-heal + verified auto-update
+  docker-update-gate.py # nightly pull+flag for the rest; apply/skip is manual
   status-*              # dashboard collector/server/installer
   index.html            # the dashboard page
   stacks/media-stack/   # compose + caddy (DuckDNS build)

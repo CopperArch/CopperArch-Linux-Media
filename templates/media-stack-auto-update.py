@@ -43,14 +43,22 @@ SERVICES = [
     dict(name="qbittorrent", compose_dir=VPN_DIR, image="lscr.io/linuxserver/qbittorrent:latest",
          mount="vpn-stack_qbittorrent_config", backup=True, kind="http", port=8080, path="/"),
     dict(name="jellyseerr", compose_dir=VPN_DIR, image="ghcr.io/seerr-team/seerr:v3.3.0",
-         mount="vpn-stack_jellyseerr_config", backup=True, kind="seerr", port=5056),
+         mount="vpn-stack_jellyseerr_config", backup=True, kind="seerr", port=5056, pinned=True),
     dict(name="overseerr", compose_dir=MEDIA_DIR, image="ghcr.io/seerr-team/seerr:v3.3.0",
-         mount=str(MEDIA_DIR / "overseerr"), backup=True, kind="seerr", port=5055),
+         mount=str(MEDIA_DIR / "overseerr"), backup=True, kind="seerr", port=5055, pinned=True),
     dict(name="plex", compose_dir=MEDIA_DIR, image="plexinc/pms-docker",
          mount=None, backup=False, kind="dockerhealth", port=32400),
     dict(name="jellyfin", compose_dir=MEDIA_DIR, image="jellyfin/jellyfin",
          mount=None, backup=False, kind="dockerhealth", port=8096),
 ]
+
+# No container may go longer than this without a genuine update attempt —
+# not a floating-tag "pull found nothing new" (that's not staleness, there's
+# nothing to apply), but either a hard version pin that never moves on its
+# own, or a remembered-bad image that would otherwise be skipped forever.
+# Added 2026-09-26.
+STALE_DAYS = 60
+STALE_SECONDS = STALE_DAYS * 86400
 
 
 def log(msg):
@@ -127,6 +135,158 @@ def http_get(url, timeout=5, headers=None):
         return e.code, ""
     except Exception:
         return None, ""
+
+
+def ghcr_tags(repo):
+    """Anonymous-pull tag list for a public ghcr.io repo (e.g.
+    'seerr-team/seerr'), via the standard OCI Distribution auth dance: an
+    anonymous bearer token, then tags/list. The registry paginates this
+    (100/page for this repo, hundreds of sha-*/preview-* build tags) via an
+    RFC 5988 `Link: <...>; rel="next"` header — a single unpaginated fetch
+    silently returns only the oldest page and can miss the actual current
+    pin entirely, which would let a stale/older tag look "newest". Follows
+    Link until it's gone (capped at 20 pages, ~2000 tags, as a sanity limit
+    against an unexpected infinite loop)."""
+    status, body = http_get(f"https://ghcr.io/token?scope=repository:{repo}:pull&service=ghcr.io")
+    if status != 200:
+        return []
+    try:
+        token = json.loads(body).get("token")
+    except Exception:
+        return []
+    if not token:
+        return []
+
+    headers = {"Authorization": f"Bearer {token}"}
+    path = f"/v2/{repo}/tags/list?n=100"
+    tags = []
+    for _ in range(20):
+        req = urllib.request.Request(f"https://ghcr.io{path}", headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read().decode("utf-8", "replace")
+                link = r.getheader("Link")
+        except Exception:
+            break
+        try:
+            tags.extend(json.loads(body).get("tags", []))
+        except Exception:
+            break
+        m = re.search(r'<([^>]+)>;\s*rel="next"', link or "")
+        if not m:
+            break
+        path = m.group(1)
+    return tags
+
+
+def newest_semver_tag(tags, current=None):
+    """Highest vX.Y.Z-style tag, but only if it's strictly newer than
+    `current` (when given) — a truncated/odd registry response should never
+    be able to look like an upgrade to an older or identical version."""
+    current_key = None
+    if current:
+        m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", current)
+        if m:
+            current_key = tuple(int(x) for x in m.groups())
+    best, best_key = None, current_key
+    for t in tags:
+        m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", t)
+        if not m:
+            continue
+        key = tuple(int(x) for x in m.groups())
+        if best_key is None or key > best_key:
+            best_key, best = key, t
+    return best
+
+
+def compose_file(svc):
+    return Path(svc["compose_dir"]) / "docker-compose.yml"
+
+
+def bump_pinned_tag(svc, new_tag):
+    """Rewrite this service's `image:` line in its compose file in place.
+    Returns (old_image, new_image), or None if the current pin wasn't found
+    (compose file edited by hand since, format changed, etc — don't guess)."""
+    path = compose_file(svc)
+    text = path.read_text()
+    old_image = svc["image"]
+    if old_image not in text:
+        return None
+    new_image = old_image.rsplit(":", 1)[0] + ":" + new_tag
+    path.write_text(text.replace(old_image, new_image, 1))
+    return old_image, new_image
+
+
+def revert_pinned_tag(svc, old_image, new_image):
+    path = compose_file(svc)
+    text = path.read_text()
+    if new_image in text:
+        path.write_text(text.replace(new_image, old_image, 1))
+    svc["image"] = old_image
+
+
+def check_pinned_update(svc, state, now):
+    """A hard-pinned tag (Seerr apps) never looks "new" to `compose pull`, so
+    without this it would sit on the same pin forever. Once the pin has gone
+    STALE_DAYS without a real update, check ghcr.io directly for a newer
+    semver tag and, if one exists, attempt to move to it with the exact same
+    backup/verify/rollback safety net as a normal update — a bumped pin is
+    exactly as risky as an unpinned one. Always returns True (handled,
+    whether by acting or by confirming there's nothing newer) so process()
+    knows to skip the normal pull path for this service this run."""
+    name = svc["name"]
+    repo = svc["image"].split(":", 1)[0].split("ghcr.io/", 1)[1]
+    current_tag = svc["image"].rsplit(":", 1)[1]
+    newest = newest_semver_tag(ghcr_tags(repo), current=current_tag)
+    if not newest or newest == current_tag:
+        log(f"{name}: pinned at {current_tag}, no newer tagged release on ghcr.io "
+            f"(checked because it's been {STALE_DAYS}+ days since the last update)")
+        state["last_updated_at"] = now
+        save_state(name, state)
+        return True
+
+    log(f"{name}: pin is {STALE_DAYS}+ days stale and ghcr.io has {newest} "
+        f"(currently {current_tag}) — attempting to move to it")
+    old_id = image_id_of_container(name)
+    bumped = bump_pinned_tag(svc, newest)
+    if not bumped:
+        warn(f"{name}: could not find its pinned image line in {compose_file(svc)} to bump")
+        return True
+    old_image, new_image = bumped
+    svc["image"] = new_image
+
+    backup_config(svc)
+    rc, out = compose(svc, "pull", name, timeout=180)
+    if rc == 0:
+        rc, out = compose(svc, "up", "-d", "--no-deps", name)
+    verifier = VERIFIERS[svc["kind"]]
+    ok, detail = (False, f"pull/recreate failed: {out.strip()[-300:]}") if rc != 0 else verifier(svc)
+
+    if ok:
+        warn(f"{name}: moved pinned tag {current_tag} -> {newest} and verified ({detail}). "
+             f"docker-compose.yml updated — this was a deliberate version pin, worth a quick manual look.")
+        state["last_updated_at"] = now
+        state["last_good_image_id"] = local_image_id(svc["image"])
+        save_state(name, state)
+        return True
+
+    warn(f"{name}: pin bump to {newest} FAILED verification ({detail}) — reverting to {current_tag}")
+    restore_config(svc)
+    revert_pinned_tag(svc, old_image, new_image)
+    sh(["docker", "tag", old_id, old_image])
+    compose(svc, "up", "-d", "--no-deps", name)
+    ok2, detail2 = verifier(svc)
+    if ok2:
+        warn(f"{name}: reverted to {current_tag} successfully ({detail2})")
+    else:
+        warn(f"{name}: CRITICAL — revert after failed pin bump ALSO failed to verify ({detail2}); "
+             f"check manually. Backup at {BACKUP_DIR}/{name}_preupdate.tar.gz")
+    # Tried either way — don't hammer a broken newer release nightly, wait
+    # out the same 60 days before trying this tag (or whatever's newest by
+    # then) again.
+    state["last_updated_at"] = now
+    save_state(name, state)
+    return True
 
 
 def get_arr_api_key(container):
@@ -279,6 +439,13 @@ def process(svc):
         warn(f"{name}: container not found, skipping")
         return
 
+    now = time.time()
+    state = load_state(name)
+
+    if svc.get("pinned") and now - state.get("last_updated_at", 0) >= STALE_SECONDS:
+        if check_pinned_update(svc, state, now):
+            return
+
     rc, out = compose(svc, "pull", name, timeout=180)
     if rc != 0:
         warn(f"{name}: docker compose pull failed: {out.strip()[-300:]}")
@@ -289,11 +456,14 @@ def process(svc):
         log(f"{name}: up to date (no new image)")
         return
 
-    state = load_state(name)
     if state.get("known_bad_image_id") == new_id:
-        log(f"{name}: skipping — image {new_id[:19]} already failed verification on a previous run, "
-            f"waiting on upstream for a newer one")
-        return
+        bad_since = state.get("known_bad_image_id_since", now)
+        if now - bad_since < STALE_SECONDS:
+            log(f"{name}: skipping — image {new_id[:19]} already failed verification on a previous run, "
+                f"waiting on upstream for a newer one")
+            return
+        log(f"{name}: image {new_id[:19]} was marked bad {STALE_DAYS}+ days ago — forcing a retry "
+            f"rather than skipping it forever")
 
     log(f"{name}: new image found ({old_id[:19]} -> {new_id[:19]}), updating")
     backup_config(svc)
@@ -309,7 +479,9 @@ def process(svc):
     if ok and not restarting:
         log(f"{name}: [OK] update verified ({detail})")
         state["last_good_image_id"] = new_id
+        state["last_updated_at"] = now
         state.pop("known_bad_image_id", None)
+        state.pop("known_bad_image_id_since", None)
         save_state(name, state)
         return
 
@@ -324,6 +496,7 @@ def process(svc):
     if rc != 0:
         warn(f"{name}: CRITICAL — could not retag old image ({out.strip()[-200:]}), manual fix needed")
         state["known_bad_image_id"] = new_id
+        state["known_bad_image_id_since"] = now
         save_state(name, state)
         return
 
@@ -331,6 +504,7 @@ def process(svc):
     if rc != 0:
         warn(f"{name}: CRITICAL — rollback recreate failed: {out.strip()[-300:]}")
         state["known_bad_image_id"] = new_id
+        state["known_bad_image_id_since"] = now
         save_state(name, state)
         return
 
@@ -341,7 +515,11 @@ def process(svc):
         warn(f"{name}: CRITICAL — rollback verification ALSO failed ({detail2}). "
              f"Container may be broken; check manually. Backup at {BACKUP_DIR}/{name}_preupdate.tar.gz")
 
+    # Refresh the cooldown on every failure (first time or a forced 60-day
+    # retry) so a persistently broken upstream image gets retried at most
+    # once every STALE_DAYS, never nightly.
     state["known_bad_image_id"] = new_id
+    state["known_bad_image_id_since"] = now
     save_state(name, state)
 
 

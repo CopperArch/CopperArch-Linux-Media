@@ -348,6 +348,7 @@ def collect_docker():
             "name": name, "state": state, "status": status, "image": image,
             "since": since, "health": health, "restarts": 0,
             "cpu": None, "mem": None, "mem_pct": None,
+            "update_available": False, "update_info": None,
         }
 
     # Restart counts + start time in one inspect call.
@@ -364,6 +365,27 @@ def collect_docker():
             if n in containers:
                 containers[n]["restarts"] = int(p[1] or 0)
                 containers[n]["started_at"] = p[2]
+
+    # Manual-approval update gate (docker-update-gate.py, run nightly from
+    # daily-routine.sh §11) — a pending-update marker means a newer image has
+    # already been pulled but not applied, waiting on the dashboard's
+    # Update/Skip buttons. Added 2026-09-26.
+    updates_dir = Path.home() / ".hermes/state/docker-updates"
+    if updates_dir.is_dir():
+        for f in updates_dir.glob("*.json"):
+            name = f.stem
+            if name not in containers:
+                continue
+            try:
+                info = json.loads(f.read_text())
+            except Exception:
+                continue
+            containers[name]["update_available"] = True
+            containers[name]["update_info"] = {
+                "old_image_id": info.get("old_image_id", "")[:19],
+                "new_image_id": info.get("new_image_id", "")[:19],
+                "checked_at": info.get("checked_at"),
+            }
 
     # Live CPU/memory. --no-stream still takes a couple of seconds; that is
     # fine at the timer's cadence and it is the only source for per-container

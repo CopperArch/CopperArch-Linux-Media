@@ -309,6 +309,33 @@ def fix_topgrade(args):
     return rc == 0, out[-4000:] or "topgrade complete"
 
 
+UPDATES_STATE_DIR = Path.home() / ".hermes/state/docker-updates"
+
+
+def fix_docker_update_apply(args):
+    """Recreate a container flagged by docker-update-gate.py's nightly check.
+    gluetun takes its whole netns sibling group with it — same safety fix as
+    the old auto-apply loop, just now behind this button instead of running
+    unconditionally at 3am (see daily-routine.sh §11, 2026-09-26)."""
+    n = args.get("name")
+    if not valid_container(n):
+        return False, f"unknown container: {n!r}"
+    if not (UPDATES_STATE_DIR / f"{n}.json").exists():
+        return False, f"no pending update flagged for {n!r}"
+    rc, out = sh(["python3", str(BIN / "docker-update-gate.py"), "apply", n], timeout=420)
+    return rc == 0, out or f"{n} updated"
+
+
+def fix_docker_update_skip(args):
+    n = args.get("name")
+    if not valid_container(n):
+        return False, f"unknown container: {n!r}"
+    if not (UPDATES_STATE_DIR / f"{n}.json").exists():
+        return False, f"no pending update flagged for {n!r}"
+    rc, out = sh(["python3", str(BIN / "docker-update-gate.py"), "skip", n], timeout=30)
+    return rc == 0, out or f"{n} update skipped"
+
+
 def fix_restart_unit(args):
     """Only user units — system units would need a password prompt nobody sees."""
     unit = args.get("unit", "")
@@ -332,6 +359,8 @@ FIXES = {
     "apt_upgrade": fix_apt_upgrade,
     "daily_routine_quick": fix_daily_routine_quick,
     "restart_unit": fix_restart_unit,
+    "docker_update_apply": fix_docker_update_apply,
+    "docker_update_skip": fix_docker_update_skip,
     "topgrade": fix_topgrade,
 }
 

@@ -441,9 +441,13 @@ if sudo journalctl --vacuum-time=14d >/dev/null 2>&1; then
 else
     warn "  journal vacuum failed (sudo/systemd?)"
 fi
-# Rotate our own maintenance logs: keep the last 30 days.
-DELETED=$(find "$ROOT/.hermes/maintenance-logs" -name '*.log' -mtime +30 -print -delete 2>/dev/null | wc -l)
-log "  [OK]   removed $DELETED maintenance log(s) older than 30 days"
+# Rotate our own maintenance logs and script backups: keep the last 5 days.
+# Both accumulate forever otherwise (this run's own .bak-* siblings in
+# ~/.local/bin never had a cleanup step until now).
+DELETED=$(find "$ROOT/.hermes/maintenance-logs" -name '*.log' -mtime +5 -print -delete 2>/dev/null | wc -l)
+log "  [OK]   removed $DELETED maintenance log(s) older than 5 days"
+BAK_DELETED=$(find "$ROOT/.local/bin" -maxdepth 1 -name '*.bak-*' -mtime +5 -print -delete 2>/dev/null | wc -l)
+log "  [OK]   removed $BAK_DELETED script backup(s) (.bak-*) older than 5 days"
 
 # ─── 9b. System-Recovery backup to Nextcloud (WebDAV) ────────────────────────
 # Added 2026-07-13 as a scripts-only backup ("Scripts-Backup"); widened
@@ -545,68 +549,32 @@ else
     log "  Skipping (--quick)"
 fi
 
-# ─── 11. Docker image pulls (everything else) ────────────────────────────────
-# sonarr/radarr/prowlarr/qbittorrent/jellyseerr (vpn-stack) and
-# plex/overseerr/jellyfin (media-stack) are excluded — step 11a above owns them.
+# ─── 11. Docker image updates — manual-approval gate (everything else) ───────
+# sonarr/radarr/prowlarr/qbittorrent/jellyseerr/overseerr/plex/jellyfin are
+# excluded — step 11a above owns those with real verify+rollback.
+#
+# These remaining containers (immich-*/portainer/tugtainer/watchstate/caddy/
+# gluetun/chrome/flaresolverr) used to be blindly pulled AND recreated every
+# night with zero review. 2026-09-26: this step now only PULLS and FLAGS —
+# docker-update-gate.py's `check` compares the freshly pulled image against
+# what's actually running and writes a pending-update marker the dashboard
+# shows as an amber bubble, but never recreates a container itself.
+# Recreating (or explicitly skipping) an update happens from the dashboard's
+# Update/Skip buttons — see status-dashboard-server.py's
+# docker_update_apply/docker_update_skip handlers, which call
+# `docker-update-gate.py apply|skip <name>`. gluetun's netns-sibling
+# recreate-together safety fix (2026-08-09 note above) still applies — it's
+# inside docker-update-gate.py's `apply` now, just triggered by a dashboard
+# click instead of running unconditionally at 3am.
 if ! $QUICK; then
-    banner "Docker Image Updates"
-    declare -A STACK_SERVICES=(
-        ["$ROOT/docker/media-stack"]="immich-redis immich-postgres immich-server immich-machine-learning portainer tugtainer watchstate caddy"
-        ["$ROOT/docker/vpn-stack"]="gluetun chrome flaresolverr"
-    )
-    for COMPOSE_DIR in "${!STACK_SERVICES[@]}"; do
-        SERVICES="${STACK_SERVICES[$COMPOSE_DIR]}"
-        if [[ ! -d "$COMPOSE_DIR" ]]; then
-            log "  [SKIP] $COMPOSE_DIR not found"
-            continue
-        fi
-        log "  Pulling images: $COMPOSE_DIR ($SERVICES)"
-        if ! cd "$COMPOSE_DIR"; then
-            warn "  cannot cd into $COMPOSE_DIR — skipping"
-            continue
-        fi
-        if docker compose pull $SERVICES 2>&1 | tee -a "$LOG"; then
-            log "  [OK]   Pull succeeded: $COMPOSE_DIR"
-        else
-            warn "  Pull had errors in $COMPOSE_DIR — attempting up anyway"
-        fi
-        # NO --remove-orphans here: it is evaluated against the *named* subset,
-        # so it deletes every container in the compose file that is not listed
-        # in $SERVICES. On 2026-08-04 that destroyed sonarr/radarr/prowlarr/
-        # qbittorrent/jellyseerr (defined in vpn-stack but owned by step 11a),
-        # taking the download pipeline down for 2 days.
-        # gluetun owns the network namespace that sonarr/radarr/prowlarr/
-        # qbittorrent/jellyseerr/chrome/flaresolverr all join via
-        # network_mode: service:gluetun. Recreating gluetun alone destroys that
-        # namespace and leaves the siblings running with no network at all —
-        # they must be recreated in the SAME command. Until 2026-08-09 this was
-        # latent: `compose pull` always died on the un-pullable local chrome
-        # image, so gluetun's image never actually changed and `up -d` never
-        # recreated it. With the pull fixed, gluetun does update, so the
-        # siblings have to come along.
-        UP_SERVICES="$SERVICES"
-        if [[ "$COMPOSE_DIR" == "$ROOT/docker/vpn-stack" ]]; then
-            RUNNING_IMG=$(docker inspect gluetun --format '{{.Image}}' 2>/dev/null)
-            LATEST_IMG=$(docker image inspect qmcgaw/gluetun --format '{{.Id}}' 2>/dev/null)
-            if [[ -n "$RUNNING_IMG" && -n "$LATEST_IMG" && "$RUNNING_IMG" != "$LATEST_IMG" ]]; then
-                UP_SERVICES="$SERVICES sonarr radarr prowlarr qbittorrent jellyseerr"
-                log "  gluetun image changed — recreating all netns members together"
-                if docker compose up -d --force-recreate $UP_SERVICES 2>&1 | tee -a "$LOG"; then
-                    log "  [OK]   Compose up (gluetun netns): $COMPOSE_DIR"
-                else
-                    warn "  Compose up had errors in $COMPOSE_DIR"
-                fi
-                continue
-            fi
-        fi
-        if docker compose up -d $UP_SERVICES 2>&1 | tee -a "$LOG"; then
-            log "  [OK]   Compose up: $COMPOSE_DIR"
-        else
-            warn "  Compose up had errors in $COMPOSE_DIR"
-        fi
-    done
+    banner "Docker Image Updates (check only — apply/skip from the dashboard)"
+    if [[ -x "$ROOT/.local/bin/docker-update-gate.py" ]]; then
+        "$ROOT/.local/bin/docker-update-gate.py" check 2>&1 | tee -a "$LOG"
+    else
+        log "  [SKIP] docker-update-gate.py not found"
+    fi
 else
-    log "Skipping Docker updates (--quick)"
+    log "Skipping Docker update checks (--quick)"
 fi
 
 banner "Daily Routine complete"
