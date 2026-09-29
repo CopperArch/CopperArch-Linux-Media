@@ -39,6 +39,8 @@ use_post_reboot_check: true
 use_duckdns: false
 use_wastebins: true
 use_alerts: false
+use_local_glm: false   # true = install Ollama + GLM on this machine
+glm_model: auto        # auto | glm-4.7-flash | glm4:9b
 
 # secrets — blank fields are generated on a fresh install
 nc_db_password: ""

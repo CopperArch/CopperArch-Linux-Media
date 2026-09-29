@@ -55,6 +55,11 @@ class Profile:
     use_duckdns: bool = False
     use_wastebins: bool = True
     use_alerts: bool = False
+    # Local AI: Z.ai's official open-weights GLM via Ollama, downloaded only on
+    # machines where this is ticked. "auto" picks by RAM at install time
+    # (glm-4.7-flash, 19 GB, needs ~24 GB RAM; else glm4:9b, 5.5 GB).
+    use_local_glm: bool = False
+    glm_model: str = "auto"
     # nightly self-heal schedule -- also changeable live from the dashboard
     # (status-dashboard-server.py's /api/schedule), which rewrites the
     # crontab directly; these fields are just what a fresh install seeds it

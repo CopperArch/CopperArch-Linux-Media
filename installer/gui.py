@@ -146,6 +146,7 @@ class Wizard(tk.Tk):
             ("Nightly maintenance routine", "use_daily_routine"),
             ("DuckDNS dynamic DNS", "use_duckdns"),
             ("Post-reboot verification", "use_post_reboot_check"),
+            ("Local AI: GLM via Ollama (5–19 GB download)", "use_local_glm"),
         ]
         self.checks = {}
         for label, attr in checks:

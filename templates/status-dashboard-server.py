@@ -401,8 +401,10 @@ PANES = [
     ("ds",      "DeepSeek",        "curl",       "free",  "DEEPSEEK_MODEL"),
     ("mm",      "Minimax M3",      "curl",       "free",  "MINIMAX_MODEL"),
     ("llm",     "Local LLM",       "ollama",     "local", None),
+    ("glm",     "GLM (local)",     "ollama",     "local", None),
     ("ask",     "Ask Claude",      "claude",     "hidden", None),
     ("askllm",  "Ask Local LLM",   "ollama",     "hidden", None),
+    ("askglm",  "Ask GLM (local)", "ollama",     "hidden", None),
     ("askgpt",  "Ask ChatGPT",     "curl",       "hidden", "CHATGPT_MODEL"),
     ("askgm",   "Ask Gemini",      "curl",       "hidden", "GEMINI_MODEL"),
     ("askhy",   "Ask Hy4",         "curl",       "hidden", "HY4_MODEL"),
@@ -419,6 +421,16 @@ PANES = [
 ]
 
 PRICING_FILE = Path.home() / ".config/status-dashboard/model-pricing.json"
+# Written by the installer only when "Local AI (GLM)" was chosen — the GLM
+# panes stay hidden elsewhere so a stray click can't start a 19 GB download.
+LOCAL_AI_FILE = Path.home() / ".config/status-dashboard/local-ai.env"
+GLM_PANES = ("glm", "askglm")
+
+
+def pane_enabled(pid, needs):
+    if pid in GLM_PANES and not LOCAL_AI_FILE.exists():
+        return False
+    return bool(shutil.which(needs))
 
 
 def read_pricing():
@@ -445,7 +457,7 @@ def available_panes():
     for pid, label, needs, group, price_key in PANES:
         if group == "hidden":
             continue
-        if not shutil.which(needs):
+        if not pane_enabled(pid, needs):
             continue
         entry = pricing.get(price_key) if price_key else None
         price = format_price(entry)
@@ -467,7 +479,7 @@ def ask_targets():
     pricing = read_pricing()
     out = []
     for pid, label, needs, group, price_key in PANES:
-        if group != "hidden" or not pid.startswith("ask") or not shutil.which(needs):
+        if group != "hidden" or not pid.startswith("ask") or not pane_enabled(pid, needs):
             continue
         price = format_price(pricing.get(price_key)) if price_key else None
         out.append({"id": pid, "label": label.removeprefix("Ask "), "price": price})

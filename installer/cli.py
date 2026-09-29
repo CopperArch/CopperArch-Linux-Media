@@ -47,6 +47,9 @@ def ask_questions(p: Profile) -> Profile:
     if confirm("Install the desktop status dashboard + self-healing?"):
         p.use_dashboard = True
         p.use_daily_routine = True
+    if confirm("Install local AI (Z.ai GLM via Ollama — free/offline, 5–19 GB "
+               "download sized to this machine's RAM)?", default=False):
+        p.use_local_glm = True
     if confirm("Set up DuckDNS dynamic DNS?"):
         p.use_duckdns = True
         p.duckdns_domains = _in("DuckDNS domains (comma separated)")
@@ -138,6 +141,7 @@ def component_flags(p: Profile) -> dict:
         "Systemd units": p.use_dashboard or p.use_post_reboot_check,
         "Cron jobs": p.use_daily_routine or p.use_duckdns or p.use_wastebins,
         "Start containers": p.use_media_stack or p.use_vpn_stack,
+        "Local AI (GLM)": p.use_local_glm,
         "Verify": True,
     }
 

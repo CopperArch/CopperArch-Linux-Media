@@ -368,7 +368,7 @@ fi
 
 # ─── 8c. Local LLM models ───────────────────────────────────────────────────
 # `ollama pull` only transfers layers whose manifest changed, so running this
-# nightly keeps deepseek-r1 current without re-downloading 9GB every time.
+# nightly keeps the GLM model current without re-downloading it every time.
 # Models live on the mergerfs pool (OLLAMA_MODELS={{MEDIA_POOL}}/ollama-models) —
 # never the root disk, which is what killed the previous Ollama install.
 banner "Local LLM Model Updates"

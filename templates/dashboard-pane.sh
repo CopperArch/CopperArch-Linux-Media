@@ -64,6 +64,19 @@ fi
 # switch without editing this script.
 OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:3b}"
 
+# Local GLM pane — Z.ai's official open-weights GLM-4.7-Flash (30B MoE, ~3B
+# active, 19 GB Q4) from the Ollama library, or glm4:9b on <24 GB RAM boxes.
+# Slower than qwen on CPU but far stronger at code/reasoning, free/offline. Short
+# keep-alive: the service default is 24h, which would pin 19 GB of RAM all day.
+# Only pull from the official library (ollama.com/library) — "free GLM-5.x
+# installer" repos on GitHub are malware lures (glm-5-ZAI/GLM-5.2, 2026-09-29).
+# The installer writes local-ai.env (GLM_MODEL=, sized to this machine's RAM)
+# only when "Local AI" was ticked; without it the GLM panes are hidden.
+AI_ENV="$HOME/.config/status-dashboard/local-ai.env"
+[ -f "$AI_ENV" ] && . "$AI_ENV"
+GLM_MODEL="${GLM_MODEL:-glm-4.7-flash}"
+GLM_KEEPALIVE="${GLM_KEEPALIVE:-10m}"
+
 # Online DeepSeek — always kept as one of the pane options. Put an API key
 # (OpenRouter or compatible) in ~/.config/status-dashboard/deepseek.env:
 #   DEEPSEEK_API_KEY=<your-openrouter-key>
@@ -135,6 +148,46 @@ press_enter() {
     exec bash -il
 }
 
+# Local (ollama) panes. OLLAMA_HOST must be set: the server is a *user*
+# service on loopback, not the old system one. Extra args after the model
+# (e.g. --keepalive) are passed straight to `ollama run`.
+ollama_up() {
+    export OLLAMA_HOST=127.0.0.1:11434
+    curl -sf -m 5 -o /dev/null "http://$OLLAMA_HOST/api/version"
+}
+local_chat() {   # local_chat <model> [ollama-run flags...] — interactive chat
+    local model="$1"; shift
+    hr "Local LLM — $model"
+    if ! ollama_up; then
+        echo "ollama is not running — start it with:"
+        echo "  systemctl --user start ollama.service"
+    elif ! ollama list 2>/dev/null | grep -q "^$model"; then
+        echo "model $model not pulled yet — fetching it now"
+        ollama pull "$model" && ollama run "$@" "$model"
+    else
+        ollama run "$@" "$model"
+    fi
+    fallback "ollama"
+}
+local_ask() {    # local_ask <model> <question...> [--keepalive X] — one-shot
+    local model="$1"; shift
+    local flags=()
+    if [[ "${*: -2:1}" == "--keepalive" ]]; then
+        flags=(--keepalive "${*: -1}"); set -- "${@:1:$#-2}"
+    fi
+    local query="$*"
+    hr "Ask $model"
+    if [[ -z "${query// }" ]]; then
+        echo "no question given"
+    elif ! ollama_up; then
+        echo "ollama is not running (systemctl --user start ollama.service)"
+    else
+        echo "> $query"; echo
+        ollama run "${flags[@]}" "$model" "$query"
+    fi
+    press_enter
+}
+
 case "$PROG" in
     claude)
         hr "Claude Code"
@@ -161,36 +214,19 @@ case "$PROG" in
         fi
         press_enter ;;
 
-    llm)
-        # Interactive chat with the local model. OLLAMA_HOST must be set: the
-        # server is a *user* service on loopback, not the old system one.
-        hr "Local LLM — $OLLAMA_MODEL"
-        export OLLAMA_HOST=127.0.0.1:11434
-        if ! curl -sf -m 5 -o /dev/null "http://$OLLAMA_HOST/api/version"; then
-            echo "ollama is not running — start it with:"
-            echo "  systemctl --user start ollama.service"
-        elif ! ollama list 2>/dev/null | grep -q "$OLLAMA_MODEL"; then
-            echo "model $OLLAMA_MODEL not pulled yet — fetching it now"
-            ollama pull "$OLLAMA_MODEL" && ollama run "$OLLAMA_MODEL"
+    llm)   local_chat "$OLLAMA_MODEL" ;;
+    askllm) local_ask "$OLLAMA_MODEL" "$@" ;;
+    glm|askglm)
+        if [[ ! -f "$AI_ENV" ]]; then
+            hr "GLM (local)"
+            echo "Local AI isn't enabled on this machine — re-run the installer"
+            echo "and tick \"Local AI: GLM via Ollama\" to download it here."
+            press_enter
+        elif [[ "$PROG" == glm ]]; then
+            local_chat "$GLM_MODEL" --keepalive "$GLM_KEEPALIVE"
         else
-            ollama run "$OLLAMA_MODEL"
-        fi
-        fallback "ollama" ;;
-
-    askllm)
-        # One-shot query against the local model, from the dashboard's box.
-        QUERY="$*"
-        export OLLAMA_HOST=127.0.0.1:11434
-        hr "Ask $OLLAMA_MODEL"
-        if [[ -z "${QUERY// }" ]]; then
-            echo "no question given"
-        elif ! curl -sf -m 5 -o /dev/null "http://$OLLAMA_HOST/api/version"; then
-            echo "ollama is not running (systemctl --user start ollama.service)"
-        else
-            echo "> $QUERY"; echo
-            ollama run "$OLLAMA_MODEL" "$QUERY"
-        fi
-        press_enter ;;
+            local_ask "$GLM_MODEL" "$@" --keepalive "$GLM_KEEPALIVE"
+        fi ;;
 
     askds)
         # One-shot query against DeepSeek (near-free — see ai-panes-check.py).
