@@ -41,6 +41,8 @@ def base_packages(ctx: Ctx) -> list[str]:
         need += ["tkinter", "xrandr", "tmux"]
     if ctx.profile.use_daily_routine:
         need += ["smartmontools", "ncdu"]
+    if ctx.profile.use_local_glm:
+        need += ["zstd"]     # ollama's install.sh unpacks a .tar.zst
     if ctx.profile.media_pool and "mergerfs" not in ctx.profile.media_pool:
         need += ["mergerfs"]
     return [l for l in need if ctx.plat.pkg_name(l)]
@@ -365,6 +367,118 @@ def start_stacks(ctx: Ctx, accept) -> tuple[bool, str]:
     return ok, ", ".join(results)
 
 
+# ── 5b. local AI (GLM via Ollama) — opt-in only ──────────────────────────────
+# Official sources only: ollama.com's installer and its model library (which
+# mirrors zai-org's weights). "Free GLM-5.x installer" repos on GitHub are
+# malware lures — never wire one in here.
+GLM_BIG, GLM_SMALL = "glm-4.7-flash", "glm4:9b"   # 19 GB / 5.5 GB downloads
+GLM_BIG_MIN_RAM_GB = 24
+
+
+def _ram_gb() -> float:
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) / 1024 / 1024
+    except OSError:
+        pass
+    return 0.0
+
+
+def pick_glm_model(profile: Profile) -> str:
+    if profile.glm_model and profile.glm_model != "auto":
+        return profile.glm_model
+    return GLM_BIG if _ram_gb() >= GLM_BIG_MIN_RAM_GB else GLM_SMALL
+
+
+OLLAMA_UNIT = """[Unit]
+Description=Ollama local LLM server (user service)
+After=network-online.target
+
+[Service]
+ExecStart={bin} serve
+Environment=OLLAMA_MODELS={models}
+Environment=OLLAMA_HOST=127.0.0.1:11434
+Environment=OLLAMA_KEEP_ALIVE=10m
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def install_local_ai(ctx: Ctx, accept) -> tuple[bool, str]:
+    if not ctx.profile.use_local_glm:
+        return True, "not selected"
+    model = pick_glm_model(ctx.profile)
+    size = {GLM_BIG: "19 GB", GLM_SMALL: "5.5 GB"}.get(model, "size unknown")
+    if not accept(f"Install Ollama and download GLM model '{model}' ({size}, "
+                  f"{_ram_gb():.0f} GB RAM detected)?"):
+        return True, "declined"
+
+    def do(ctx):
+        import tempfile
+        from urllib.request import urlopen
+        home = Path.home()
+        # 1. ollama binary via the official installer (handles CUDA/ROCm)
+        if not have("ollama"):
+            with urlopen("https://ollama.com/install.sh", timeout=60) as r:
+                script = r.read()
+            with tempfile.NamedTemporaryFile("wb", suffix=".sh", delete=False) as f:
+                f.write(script)
+            p = ctx.sudo.run(["sh", f.name], timeout=1800)
+            os.unlink(f.name)
+            if p.returncode != 0 or not have("ollama"):
+                return False, f"ollama install.sh rc={p.returncode}"
+        # The official script enables a *system* unit; we run a loopback-only
+        # user unit instead (same as dashboard-pane.sh/ollama-model-update.sh
+        # expect), so the two must not fight over :11434.
+        ctx.sudo.run(["systemctl", "disable", "--now", "ollama.service"],
+                     timeout=60, quiet=True)
+        # 2. models on the media pool when there is one, never the root disk
+        pool = Path(ctx.profile.media_pool or "")
+        models = pool / "ollama-models" if pool.is_dir() else home / ".ollama/models"
+        if not models.exists():
+            try:
+                models.mkdir(parents=True)
+            except PermissionError:
+                user = ctx.profile.user or os.environ.get("USER") or home.name
+                ctx.sudo.run(["install", "-d", "-o", user, "-g", user, models],
+                             timeout=30)
+        free_gb = shutil.disk_usage(models).free / 1e9
+        if free_gb < 30:
+            return False, f"only {free_gb:.0f} GB free at {models} — not pulling"
+        # 3. user unit
+        udir = home / ".config/systemd/user"
+        udir.mkdir(parents=True, exist_ok=True)
+        (udir / "ollama.service").write_text(
+            OLLAMA_UNIT.format(bin=shutil.which("ollama"), models=models))
+        run(["systemctl", "--user", "daemon-reload"], timeout=30)
+        run(["systemctl", "--user", "enable", "--now", "ollama.service"], timeout=60)
+        env = dict(os.environ, OLLAMA_HOST="127.0.0.1:11434")
+        import subprocess, time
+        for _ in range(30):
+            if subprocess.run(["ollama", "list"], env=env, capture_output=True
+                              ).returncode == 0:
+                break
+            time.sleep(2)
+        # 4. pull (resumable; re-running the installer continues a broken pull)
+        log(f"  downloading {model} — {size}, this can take a while")
+        p = subprocess.run(["ollama", "pull", model], env=env,
+                           capture_output=True, text=True, timeout=6 * 3600)
+        if p.returncode != 0:
+            return False, f"ollama pull {model} failed: {p.stderr.strip()[-200:]}"
+        # 5. tell the dashboard which model to show (its GLM panes stay
+        # hidden on machines without this file)
+        conf = home / ".config/status-dashboard"
+        conf.mkdir(parents=True, exist_ok=True)
+        (conf / "local-ai.env").write_text(
+            f"GLM_MODEL={model}\nGLM_KEEPALIVE=10m\n")
+        return True, f"ollama + {model} installed (models in {models})"
+    return _exec_step(ctx, f"install ollama + pull {model}", do)
+
+
 # ── 6. verify ────────────────────────────────────────────────────────────────
 def verify(ctx: Ctx) -> tuple[bool, str]:
     checks = []
@@ -402,6 +516,7 @@ def run_all(ctx: Ctx, accept, accept_steps: dict[str, bool]) -> list[tuple[str, 
         ("Local scripts",   lambda: install_scripts(ctx)),
         ("Systemd units",   lambda: install_units(ctx)),
         ("Cron jobs",       lambda: install_cron(ctx)),
+        ("Local AI (GLM)",  lambda: install_local_ai(ctx, accept)),
         ("Start containers", lambda: start_stacks(ctx, accept)),
         ("Verify",          lambda: verify(ctx)),
     ]

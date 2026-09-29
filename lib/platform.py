@@ -41,6 +41,8 @@ class Platform:
         "mergerfs":      ("mergerfs",               "mergerfs",            None,             "mergerfs"),
         "ufw":           ("ufw",                    "ufw",                 None,             None),
         "xrandr":        ("x11-xserver-utils",      "xrandr",              "xorg-xrandr",    "xrandr"),
+        "tmux":          ("tmux",                   "tmux",                "tmux",           "tmux"),
+        "zstd":          ("zstd",                   "zstd",                "zstd",           "zstd"),
     }
 
     def pkg_name(self, logical: str) -> str | None:
