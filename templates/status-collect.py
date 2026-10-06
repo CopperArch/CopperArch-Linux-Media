@@ -213,6 +213,18 @@ def collect_sensors():
     return {"temps": temps, "fans": fans}
 
 
+def collect_power():
+    """Averaged CPU/GPU watts from power-sampler.service (root; the RAPL
+    counters it reads are root-only). None = sampler not installed/stale."""
+    try:
+        d = json.loads(Path("/run/power-sampler/power.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if time.time() - d.get("ts", 0) > 60:
+        return None
+    return {"now": d.get("now", {}), "avg_1m": d.get("avg_1m", {})}
+
+
 def collect_host():
     mem = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -266,6 +278,7 @@ def collect_host():
             "swap_used": mem.get("SwapTotal", 0) - mem.get("SwapFree", 0),
         },
         "sensors": collect_sensors(),
+        "power": collect_power(),
         "reboot_required": reboot_required,
         "reboot_packages": reboot_pkgs,
         "failed_units": failed_units,
