@@ -436,6 +436,70 @@ if docker image prune -f >/dev/null 2>&1; then
 else
     warn "  docker image prune had errors"
 fi
+# ─── 9a. Root-disk space cleanup (added 2026-10-06) ─────────────────────────
+# Root hit 82% from things nothing was using: a 29G FreeBSD test-VM disk in
+# ~/build-iso, ~5G of old images left after updates, and Chrome's 4G
+# on-device AI model downloaded into two profiles. Each is cleared here, only
+# under conditions that make it provably unused.
+ROOT_BEFORE=$(df --output=used -B1 / | tail -1)
+
+# Old images left behind by updates. NOT `prune -a`: an image is kept if ANY
+# container (running or stopped) uses it, ANY compose file in ~/docker names
+# it, or it's a pending update waiting behind the dashboard's Update button
+# (docker-update-gate.py state). Plain `rmi` (no -f) also refuses anything
+# still referenced, e.g. a parent of a locally built image.
+KEEP=$( {
+    docker ps -aq | xargs -r docker inspect -f '{{.Image}}'
+    for f in "$ROOT"/docker/*/docker-compose.yml; do
+        docker compose -f "$f" config --images 2>/dev/null \
+            | xargs -r docker image inspect -f '{{.Id}}' 2>/dev/null
+    done
+    cat "$ROOT"/.hermes/state/docker-updates/*.json 2>/dev/null \
+        | grep -o '"new_image_id": *"[^"]*"' | cut -d'"' -f4
+} | sort -u )
+IMG_RM=0
+for id in $(docker images -q --no-trunc | sort -u); do
+    grep -qx "$id" <<<"$KEEP" && continue
+    docker rmi "$id" >/dev/null 2>&1 && IMG_RM=$((IMG_RM + 1))
+done
+log "  [OK]   removed $IMG_RM unused docker image(s) (kept everything a container, compose file or pending update needs)"
+
+# FreeBSD ISO test leftovers: VM disk images untouched for 7 days and not open
+# by any process, and the stock FreeBSD install media (build-iso.sh re-fetches
+# it). The built CopperArch ISO itself is never touched.
+if [[ -d "$ROOT/build-iso" ]]; then
+    ISO_FREED=0
+    while IFS= read -r -d '' f; do
+        fuser -s "$f" 2>/dev/null && continue        # a VM still has it open
+        sz=$(du -B1 "$f" | cut -f1)
+        rm -f "$f" && ISO_FREED=$((ISO_FREED + sz))
+        log "  [FIX ] removed stale $(basename "$f")"
+    done < <(find "$ROOT/build-iso" -maxdepth 1 -type f -mtime +7 \
+                \( -name '*.raw' -o -name '*.qcow2' -o -name '*.vmdk' -o -name '*.vdi' \
+                   -o -name 'FreeBSD-*-dvd1.iso' -o -name 'FreeBSD-*-disc1.iso' \
+                   -o -name 'FreeBSD-*-memstick.img' \) -print0)
+    log "  [OK]   build-iso: $(numfmt --to=iec "$ISO_FREED") of stale test disks/install media removed"
+fi
+
+# Chrome's on-device AI model (4G per profile). A managed policy stops the
+# download; if the policy is gone or a profile fetched it anyway, clear it.
+CHROME_POLICY="/etc/opt/chrome/policies/managed/no-ondevice-ai.json"
+[[ -f "$CHROME_POLICY" ]] || warn "  Chrome policy $CHROME_POLICY missing — Chrome will re-download its 4G on-device AI model (reinstall: {\"GenAILocalFoundationalModelSettings\": 1})"
+for d in "$ROOT/.config/google-chrome/OptGuideOnDeviceModel" \
+         "$ROOT/.local/share/status-dashboard/chrome-profile/OptGuideOnDeviceModel"; do
+    if [[ -d "$d" ]]; then
+        log "  [FIX ] removed Chrome on-device AI model ($(du -sh "$d" | cut -f1)) from ${d%/OptGuideOnDeviceModel}"
+        rm -rf "$d"
+    fi
+done
+
+ROOT_AFTER=$(df --output=used -B1 / | tail -1)
+ROOT_PCT=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+log "  [OK]   root disk cleanup freed $(numfmt --to=iec $(( ROOT_BEFORE > ROOT_AFTER ? ROOT_BEFORE - ROOT_AFTER : 0 ))) — root now ${ROOT_PCT}% full"
+if (( ROOT_PCT >= 80 )); then
+    warn "  root disk still ${ROOT_PCT}% full — biggest folders in \$HOME: $(du -xsh "$ROOT"/* "$ROOT"/.[!.]* 2>/dev/null | sort -rh | head -4 | awk '{printf "%s %s; ", $2, $1}')"
+fi
+
 # Docker log rotation guard: verify /etc/docker/daemon.json still enforces the
 # 30MB/container cap (self-heals + restarts Docker if it ever drifts). Rotation
 # does the ongoing capping; this just keeps the policy in place. Runs via a
