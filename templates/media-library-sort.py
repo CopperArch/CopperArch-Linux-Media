@@ -164,9 +164,26 @@ def move(src_pool, dst_pool):
             f"where it is (duplicate check will compare them)")
         return False
     if APPLY:
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        make_dirs(dst.parent)
         os.rename(src, dst)
     return True
+
+
+def make_dirs(d):
+    """mkdir -p, giving each new folder its parent's owner — the FreeBSD
+    edition runs this as root, and a root-owned season folder would lock the
+    jailed Sonarr/Radarr out of it."""
+    missing = []
+    while not d.exists():
+        missing.append(d)
+        d = d.parent
+    st = d.stat()
+    for m in reversed(missing):
+        m.mkdir()
+        try:
+            os.chown(m, st.st_uid, st.st_gid)
+        except PermissionError:
+            pass                    # not root: it's ours already
 
 
 # ── what the *arrs manage ────────────────────────────────────────────────────
@@ -340,7 +357,7 @@ def move_folder(src_pool, dst_pool):
         return False
     if APPLY:
         for d in parts:
-            (d / rel_d).parent.mkdir(parents=True, exist_ok=True)
+            make_dirs((d / rel_d).parent)
             os.rename(d / rel_s, d / rel_d)
     return True
 
