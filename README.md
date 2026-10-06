@@ -138,7 +138,11 @@ Notes:
    both apps, re-fetching broken ones. Files with no TMDB franchise can be
    grouped by hand in `~/.config/media-library/manual-collections.json`
    (collection name → pieces of file names, plus optional title fixes),
-   which is re-applied to both apps every night. Don't install Jellyfin's
+   which is re-applied to both apps every night. A disk-space step removes
+   Docker images nothing needs (keeping anything a container, compose file
+   or pending update uses), stale test-VM disks / stock install media in
+   `~/build-iso`, and Chrome's 4 GB on-device AI model if it reappears, then
+   warns when the root disk is still 80%+ full. Don't install Jellyfin's
    "TMDb Box Sets" plugin alongside it: that plugin deletes any collection
    it didn't build itself.
 
