@@ -449,15 +449,20 @@ def apply_manual_plex(tok):
                     # Plex stacks "Part 1"/"Part 2" files into one entry, so
                     # it gets the shared title rather than the first part's.
                     name = re.sub(r"\s*-\s*Part\s*\d+$", "", name)
-                if i.get("title") != name or i.get("year") != year:
+                if i.get("title") != name or i.get("year") != year \
+                        or not i.get("originallyAvailableAt"):
                     # A wrong online match (e.g. a Police Squad! episode
                     # matched to "A Dinner Date") would keep pulling that
                     # film's poster/summary back — unmatch it first.
                     if i.get("guid", "").startswith("plex://"):
                         plex(tok, f"/library/metadata/{rk}/unmatch", method="PUT", raw=True)
+                    # Plex only locks the year through the release date;
+                    # a bare year.locked is silently ignored and the next
+                    # metadata refresh wipes it.
                     q.update({"title.value": name, "title.locked": 1,
-                              "titleSort.value": name, "year.value": year,
-                              "year.locked": 1})
+                              "titleSort.value": name,
+                              "originallyAvailableAt.value": f"{year}-01-01",
+                              "originallyAvailableAt.locked": 1})
             if ckeys:
                 cur = [c["tag"] for c in (plex(tok, f"/library/metadata/{rk}")
                                           .get("Metadata", [{}])[0].get("Collection") or [])]
