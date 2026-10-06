@@ -80,7 +80,7 @@ JELLYFIN = {"url": "http://localhost:8096",
 # The second kind will never self-heal from a refresh, so seasons fall back to
 # inheriting their series poster, which is what clients show anyway rather
 # than a blank.
-ARTWORK_TYPES = ("Movie", "Series", "Season", "Episode")
+ARTWORK_TYPES = ("Movie", "Series", "Season", "Episode", "BoxSet")
 
 # Desired qBittorrent queue prefs (the settings tuned 2026-07-08).
 DESIRED_PREFS = {

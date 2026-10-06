@@ -274,6 +274,14 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
             ctx.sudo.run(["install", "-o", "root", "-g", "root", "-m", "0440",
                           tmp, "/etc/sudoers.d/daily-routine"], timeout=30)
             tmp.unlink()
+        # Power tile: a root service publishes averaged watts from the CPU's
+        # RAPL counters (root-only by design) and any GPU energy sensor.
+        # Only where such a sensor exists — otherwise the tile stays hidden.
+        has_power = Path("/sys/class/powercap/intel-rapl:0").exists() or any(
+            Path("/sys/class/hwmon").glob("hwmon*/energy*_input"))
+        if ctx.profile.use_dashboard and has_power:
+            ctx.sudo.run(["bash", str(bin_dir / "power-sampler-install.sh")],
+                         timeout=60)
         # ttyd (dashboard terminal pane) — static binary from templates/bin
         ttyd = ctx.tpl / "bin/ttyd"
         if ctx.profile.use_dashboard and ttyd.exists() and ctx.plat.arch == "x86_64":

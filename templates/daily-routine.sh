@@ -277,6 +277,28 @@ else
     log "  [SKIP] media-stack-selfheal.py not found"
 fi
 
+# ─── 4b2. Misfiled media: episodes in Movies/, movies in Tv Shows/ ──────────
+# Moves them to the right library (rename on the same disk, never overwrites,
+# skips *arr-managed files and anything touched in the last 2h). Runs before
+# the duplicate steps so a clash it leaves behind gets compared there.
+banner "Misfiled Movies / TV Episodes"
+if [[ -f "$ROOT/.local/bin/media-library-sort.py" ]]; then
+    python3 "$ROOT/.local/bin/media-library-sort.py" --apply 2>&1 | tee -a "$LOG"
+else
+    log "  [SKIP] media-library-sort.py not found"
+fi
+
+# ─── 4b3. Collections + artwork in Jellyfin and Plex ────────────────────────
+# Creates/tops up Jellyfin's TMDB franchise collections (2+ movies), keeps
+# Plex's automatic collections on, and actually fetches every poster in both
+# apps, re-fetching any that are set but broken. Only ever adds.
+banner "Media Collections & Artwork"
+if [[ -f "$ROOT/.local/bin/media-library-health.py" ]]; then
+    python3 "$ROOT/.local/bin/media-library-health.py" 2>&1 | tee -a "$LOG"
+else
+    log "  [SKIP] media-library-health.py not found"
+fi
+
 # ─── 4c. Seerr (Overseerr/jellyseerr) connectivity check ────────────────────
 # Added 2026-07-21: jellyseerr sat un-onboarded (no Jellyfin/Radarr/Sonarr,
 # public.initialized=false) for weeks with nobody noticing, because it fails

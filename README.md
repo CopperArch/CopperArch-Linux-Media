@@ -100,7 +100,13 @@ Notes:
    session instead of killing whatever the agent was doing — reopening the
    same pane reattaches to it. Drag (or double/triple-click) to highlight
    text in a pane — it's copied straight to the desktop clipboard, even
-   while the agent has grabbed the mouse.
+   while the agent has grabbed the mouse. A running repair or update can be
+   stopped with **Cancel** (two clicks — interrupting an upgrade half-way
+   can leave it half-applied); it stops the whole command, including what
+   runs under sudo, and skips anything still queued. Where the CPU exposes
+   RAPL power counters (or a GPU exposes an energy sensor), a small root
+   service (`power-sampler.py`) publishes averaged watts and the CPU &
+   memory panel shows a **Power** tile.
 3. **Nightly routine** — `daily-routine.sh` re-installs drifted dashboard
    units, re-applies gluetun iptables rules, verifies the docker log-cap
    policy, auto-updates the arr stack with verify+auto-rollback (including a
@@ -119,6 +125,22 @@ Notes:
    checks the tunnel directly (`vpn_tunnel_health()`) rather than trusting
    gluetun's Docker healthcheck, which stays "healthy" even when OpenVPN is
    stuck failing auth in a loop.
+
+   The routine also keeps the media libraries tidy:
+   `media-library-sort.py` moves TV episodes that landed in the movies
+   folder (and movies in the TV folder) to the right place — renames on the
+   same disk only, never overwrites, skips anything Radarr/Sonarr manage or
+   that changed in the last 2h. `media-library-health.py` then makes sure
+   every movie franchise with 2+ films has a Jellyfin collection (TMDB
+   franchise data via Radarr; movies Jellyfin couldn't identify are matched
+   by cleaned-up title only when an independent IMDb search agrees), keeps
+   Plex's automatic collections on, and actually fetches every poster in
+   both apps, re-fetching broken ones. Files with no TMDB franchise can be
+   grouped by hand in `~/.config/media-library/manual-collections.json`
+   (collection name → pieces of file names, plus optional title fixes),
+   which is re-applied to both apps every night. Don't install Jellyfin's
+   "TMDb Box Sets" plugin alongside it: that plugin deletes any collection
+   it didn't build itself.
 
 ## Repository layout
 
