@@ -59,6 +59,14 @@ fi
 # source-repo; if that checkout is still around, follow its VERSION so the
 # panel stays right after a `git pull` without re-running the installer.
 SRC_REPO="$(cat "$HOME/.config/status-dashboard/source-repo" 2>/dev/null || true)"
+# GitHub bumps VERSION by itself on every merge (.github/workflows/
+# bump-version.yml), so fetch it first — only as a fast-forward, and only
+# when the checkout is clean and not in the middle of other work.
+if [[ -n "$SRC_REPO" && -d "$SRC_REPO/.git" ]] && command -v git >/dev/null 2>&1 \
+   && [[ -z "$(git -C "$SRC_REPO" status --porcelain 2>/dev/null)" ]] \
+   && [[ "$(git -C "$SRC_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "main" ]]; then
+    GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$SRC_REPO" pull -q --ff-only >/dev/null 2>&1 || true
+fi
 if [[ -n "$SRC_REPO" && -f "$SRC_REPO/VERSION" ]] && ! cmp -s "$SRC_REPO/VERSION" "$SHARE/VERSION"; then
     cp "$SRC_REPO/VERSION" "$SHARE/VERSION"
     say "[FIX]  dashboard version is now $(head -1 "$SHARE/VERSION")"
