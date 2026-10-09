@@ -32,8 +32,10 @@ shift || true
 # state. DASHBOARD_PANE_TMUX guards against re-wrapping once we're already
 # the tmux-managed re-exec.
 AGENT_PANES=(claude opencode oa mm qw gpt gm hy ds)
+# "free:<openrouter model id>" panes (the picker's FREE tier) are agent panes
+# too. tmux session names can't hold ':' '.' or '/', so those are flattened.
 if [[ -z "${DASHBOARD_PANE_TMUX:-}" ]] && command -v tmux >/dev/null 2>&1 \
-   && printf '%s\n' "${AGENT_PANES[@]}" | grep -qx "$PROG"; then
+   && { printf '%s\n' "${AGENT_PANES[@]}" | grep -qx -- "$PROG" || [[ "$PROG" == free:* ]]; }; then
     export DASHBOARD_PANE_TMUX=1
     # Highlight-to-copy. The agents turn on mouse tracking and tmux passes
     # that through to ttyd's xterm.js, so a drag went to the app and nothing
@@ -57,7 +59,7 @@ if [[ -z "${DASHBOARD_PANE_TMUX:-}" ]] && command -v tmux >/dev/null 2>&1 \
           ';' bind-key -T root TripleClick1Pane select-pane -t = '\;' copy-mode -M '\;' send-keys -X select-line '\;' send-keys -X copy-pipe-and-cancel "$CLIP"
         )
     fi
-    exec tmux new-session -A -s "dash-$PROG" "$0" "$PROG" "$@" "${COPY_OPTS[@]}"
+    exec tmux new-session -A -s "dash-${PROG//[^A-Za-z0-9_-]/_}" "$0" "$PROG" "$@" "${COPY_OPTS[@]}"
 fi
 
 # Which local model the llm/askllm panes use. Override in the environment to
@@ -393,6 +395,30 @@ case "$PROG" in
             OPENROUTER_API_KEY="$DEEPSEEK_API_KEY" opencode --model "openrouter/$DEEPSEEK_MODEL"
         fi
         fallback "deepseek" ;;
+
+    free:*)
+        # FREE tier — any model that is $0 on OpenRouter, run through opencode
+        # like the other agent panes. The id comes from the URL, so it is only
+        # accepted if it is in free-models.json (rewritten nightly by
+        # ai-panes-check.py), and its price is re-checked live right here: a
+        # model that stopped being free since last night refuses to start
+        # instead of quietly billing the account.
+        MODEL="${PROG#free:}"
+        FREE_FILE="$HOME/.config/status-dashboard/free-models.json"
+        hr "FREE — $MODEL — file/shell access via opencode"
+        if ! python3 -c 'import json,sys; sys.exit(0 if any(m["id"] == sys.argv[2] for m in json.load(open(sys.argv[1]))["models"]) else 1)' "$FREE_FILE" "$MODEL" 2>/dev/null; then
+            echo "$MODEL is not in the current free-model list (it changes nightly)."
+            echo "Pick another model from the FREE section of the menu."
+        elif need_key "free model $MODEL — a key is still required, but it is not charged"; then
+            python3 "$HOME/.local/bin/ai-panes-check.py" --is-free "$MODEL"
+            case $? in
+                1)  echo "$MODEL is no longer free on OpenRouter — not starting it, so nothing gets billed."
+                    echo "The menu drops it at the next daily routine; pick another FREE model." ;;
+                *)  # 0 = confirmed free now; 2 = couldn't check, trust last night's list
+                    OPENROUTER_API_KEY="$DEEPSEEK_API_KEY" opencode --model "openrouter/$MODEL" ;;
+            esac
+        fi
+        fallback "free model" ;;
 
     shell)
         hr "Shell"; exec bash -il ;;

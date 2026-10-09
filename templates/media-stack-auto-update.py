@@ -203,6 +203,27 @@ def compose_file(svc):
     return Path(svc["compose_dir"]) / "docker-compose.yml"
 
 
+def sync_pinned_image(svc):
+    """Point svc["image"] at whatever tag the compose file pins RIGHT NOW.
+
+    The tag in SERVICES is only a seed. check_pinned_update() rewrites the
+    compose file when it moves a pin, so from the next run on the hardcoded
+    tag is stale: the old image has been pruned, local_image_id() returns
+    None and process() died every night with "'NoneType' object is not
+    subscriptable". The compose file is the single source of truth for a
+    pinned tag."""
+    repo = svc["image"].rsplit(":", 1)[0]
+    try:
+        text = compose_file(svc).read_text()
+    except OSError:
+        return
+    # First image: line for this repo inside this service's own block.
+    block = re.search(rf"^  {re.escape(svc['name'])}:\s*\n((?:(?:    .*|\s*)\n)*)", text, re.M)
+    m = re.search(rf"^\s*image:\s*[\"']?({re.escape(repo)}:[\w.\-]+)", block.group(1) if block else "", re.M)
+    if m:
+        svc["image"] = m.group(1)
+
+
 def bump_pinned_tag(svc, new_tag):
     """Rewrite this service's `image:` line in its compose file in place.
     Returns (old_image, new_image), or None if the current pin wasn't found
@@ -442,6 +463,9 @@ def process(svc):
     now = time.time()
     state = load_state(name)
 
+    if svc.get("pinned"):
+        sync_pinned_image(svc)
+
     if svc.get("pinned") and now - state.get("last_updated_at", 0) >= STALE_SECONDS:
         if check_pinned_update(svc, state, now):
             return
@@ -452,6 +476,10 @@ def process(svc):
         return
 
     new_id = local_image_id(svc["image"])
+    if new_id is None:
+        warn(f"{name}: image {svc['image']} is not present locally after a successful pull — "
+             f"the tag in this script no longer matches {compose_file(svc)}; nothing changed")
+        return
     if new_id == old_id:
         log(f"{name}: up to date (no new image)")
         return
