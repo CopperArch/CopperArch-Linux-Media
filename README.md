@@ -98,7 +98,10 @@ Notes:
    only. The AI chat panes (Claude Code, opencode, and the OpenRouter
    models) run under `tmux`, so closing the terminal dock only detaches the
    session instead of killing whatever the agent was doing — reopening the
-   same pane reattaches to it. Drag (or double/triple-click) to highlight
+   same pane reattaches to it. The picker's **Free** section lists every
+   model that is currently free on OpenRouter — rebuilt nightly, and
+   re-checked live before a free pane starts so it can never bill — and
+   paid models show their price in pounds at the day's exchange rate. Drag (or double/triple-click) to highlight
    text in a pane — it's copied straight to the desktop clipboard, even
    while the agent has grabbed the mouse. A running repair or update can be
    stopped with **Cancel** (two clicks — interrupting an upgrade half-way

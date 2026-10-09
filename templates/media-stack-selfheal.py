@@ -494,8 +494,19 @@ def dead_torrents(opener):
     return dead
 
 
-def pipeline_throughput(opener):
+def pipeline_throughput(opener, dead_hashes=()):
     """Report whether the download pipeline is actually moving any bytes.
+
+    2026-10-09: this warned (and emailed) on most runs for reasons that were
+    never a broken pipeline, so three things no longer count as "stalled":
+      - torrents the dead-download scan just flagged (dead_hashes) — they are
+        removed and re-searched later in this same run;
+      - grabs younger than DEAD_NO_SEED_AGE_H that are still looking for
+        seeds/metadata — the routine itself triggers new searches minutes
+        earlier, and the dead scan clears them if they never find a seed;
+      - a single 0 B/s sample. daily-routine.sh cycles the VPN tunnel one
+        second before this runs, so the first sample nearly always caught
+        qBittorrent mid-reconnect. It is re-sampled before warning.
 
     dead_torrents() only catches torrents past DEAD_AGE_H, so a pipeline that
     broke wholesale (VPN wedged, every grab seed-starved) looks healthy for two
@@ -509,13 +520,50 @@ def pipeline_throughput(opener):
     except Exception as e:
         log(f"  [FAIL] can't read transfer info: {e}")
         return
-    speed = info.get("dl_info_speed", 0)
-    conn = info.get("connection_status", "unknown")
-    incomplete = [t for t in ts if t["progress"] < 1.0]
     STALLED = ("stalledDL", "metaDL", "forcedMetaDL", "queuedDL")
-    stalled = [t for t in incomplete if t["state"] in STALLED]
-    log(f"  [INFO] {len(incomplete)} incomplete, {len(stalled)} stalled, "
+    dead_hashes = set(dead_hashes)
+
+    def sample(info, ts):
+        speed = info.get("dl_info_speed", 0)
+        all_incomplete = [t for t in ts if t["progress"] < 1.0]
+        doomed = [t for t in all_incomplete if t["hash"].lower() in dead_hashes]
+        young = [t for t in all_incomplete
+                 if t["hash"].lower() not in dead_hashes
+                 and t["state"] in STALLED
+                 and (NOW - t.get("added_on", NOW)) / 3600 < DEAD_NO_SEED_AGE_H]
+        skip = {t["hash"] for t in doomed + young}
+        incomplete = [t for t in all_incomplete if t["hash"] not in skip]
+        stalled = [t for t in incomplete if t["state"] in STALLED]
+        return speed, all_incomplete, doomed, young, incomplete, stalled
+
+    def is_stalled(speed, incomplete, stalled):
+        return bool(incomplete) and speed < STALL_FLOOR_BPS and \
+            len(stalled) >= max(3, (2 * len(incomplete)) // 3)
+
+    speed, all_incomplete, doomed, young, incomplete, stalled = sample(info, ts)
+    conn = info.get("connection_status", "unknown")
+    log(f"  [INFO] {len(all_incomplete)} incomplete, {len(stalled)} stalled, "
         f"{speed / 1048576:.2f} MB/s, connection={conn}")
+    if doomed or young:
+        log(f"  [INFO] not counted as stalled: {len(doomed)} dead grab(s) being "
+            f"replaced this run, {len(young)} new grab(s) under "
+            f"{DEAD_NO_SEED_AGE_H}h old still finding seeds")
+    # Looks stalled on the first sample: give qBittorrent time to reconnect
+    # after the tunnel cycle before believing it.
+    for _ in range(3):
+        if not is_stalled(speed, incomplete, stalled):
+            break
+        log("  [INFO] nothing moving yet — re-checking in 60s (the VPN tunnel "
+            "was only just cycled)")
+        time.sleep(60)
+        try:
+            info = qbit_get(opener, "/api/v2/transfer/info")
+            ts = qbit_get(opener, "/api/v2/torrents/info")
+        except Exception as e:
+            log(f"  [FAIL] can't read transfer info: {e}")
+            return
+        speed, all_incomplete, doomed, young, incomplete, stalled = sample(info, ts)
+        conn = info.get("connection_status", "unknown")
     if conn not in ("connected", "firewalled"):
         log(f"  [WARN] qBittorrent connection status is '{conn}' — check gluetun")
         alert(f"qBittorrent connection status is '{conn}' (expected connected)")
@@ -531,7 +579,7 @@ def pipeline_throughput(opener):
     # "pipeline moving" and stayed silent for another day. Any single crawling
     # torrent was enough to suppress the alarm. Compare against a floor
     # instead: below this, nothing is meaningfully being fetched.
-    if speed < STALL_FLOOR_BPS and len(stalled) >= max(3, (2 * len(incomplete)) // 3):
+    if is_stalled(speed, incomplete, stalled):
         log(f"  [WARN] pipeline appears stalled: {len(stalled)}/"
             f"{len(incomplete)} incomplete torrents stalled at 0 B/s")
         alert(f"download pipeline stalled: {len(stalled)}/{len(incomplete)} "
@@ -629,6 +677,41 @@ def fix_missing_artwork():
                 f"{s.get('SeriesName')} / {s.get('Name')} ({e.code})")
     if inherited:
         log(f"  [FIX ] {inherited} season(s) inherited their series poster")
+
+    # Collections with nothing upstream: hand-grouped ones have no TMDb
+    # collection id, so no provider will ever return a poster and they would
+    # warn + email every single night. Give them the poster of their first
+    # member that has one.
+    boxed = 0
+    try:
+        uid = next(u["Id"] for u in json.load(jf_request("GET", "/Users"))
+                   if (u.get("Policy") or {}).get("IsAdministrator"))
+        bare_sets = [b for b in jf_items("BoxSet")
+                     if not (b.get("ImageTags") or {}).get("Primary")]
+    except Exception as e:
+        log(f"  [WARN] can't list collections for poster inheritance ({e})")
+        bare_sets = []
+    for b in bare_sets:
+        try:
+            kids = json.load(jf_request(
+                "GET", f"/Users/{uid}/Items?ParentId={b['Id']}")).get("Items", [])
+            donor = next((k for k in kids
+                          if (k.get("ImageTags") or {}).get("Primary")), None)
+            if not donor:
+                continue
+            img = jf_request("GET",
+                             f"/Items/{donor['Id']}/Images/Primary?maxWidth=600")
+            ctype = img.headers.get("Content-Type", "image/jpeg")
+            jf_request("POST", f"/Items/{b['Id']}/Images/Primary",
+                       {"Content-Type": ctype},
+                       base64.b64encode(img.read()))
+            boxed += 1
+        except Exception as e:
+            log(f"  [WARN] could not set poster on collection "
+                f"{b.get('Name')} ({e})")
+    if boxed:
+        log(f"  [FIX ] {boxed} collection(s) took the poster of a film they contain")
+    inherited += boxed
 
     # Uploaded images don't appear in ImageTags until the library re-indexes,
     # and clients key off those tags — without this the posters exist on disk
@@ -1761,7 +1844,7 @@ def main():
             f"seeds in the swarm, or >{DEAD_AGE_H}h otherwise)")
 
     if opener:
-        pipeline_throughput(opener)
+        pipeline_throughput(opener, [d[0] for d in dead])
 
     log("Download-client connectivity:")
     arr_test_downloadclient(RADARR, "Radarr")

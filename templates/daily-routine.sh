@@ -245,8 +245,16 @@ if [[ -n "$QB_INFO" ]]; then
     if [[ "$QB_CONN" == "connected" ]]; then
         log "  [OK]   qBittorrent connected (DHT nodes: $QB_DHT)"
     elif [[ "$QB_CONN" == "firewalled" ]]; then
-        log "  [WARN] qBittorrent firewalled — outbound OK, inbound port unreachable (VPN limitation)"
-        log "         DHT nodes: $QB_DHT"
+        # This used to log [WARN] on every run and could never clear: most
+        # VPN providers offer no port forwarding, so no inbound port is ever
+        # reachable and "firewalled" is the permanent normal state (downloads
+        # work, qBittorrent just can't accept incoming peers). Only warn if
+        # DHT is empty too, which means outbound is broken as well.
+        if [[ "${QB_DHT:-0}" -gt 0 ]]; then
+            log "  [OK]   qBittorrent online, outbound-only (DHT nodes: $QB_DHT) — no inbound port, normal when the VPN has no port forwarding"
+        else
+            log "  [WARN] qBittorrent firewalled AND 0 DHT nodes — no peers reachable in either direction"
+        fi
     else
         warn "  [FAIL] qBittorrent status: ${QB_CONN:-unknown}"
     fi
@@ -411,6 +419,9 @@ fi
 # into deepseek.env's managed block; dashboard-pane.sh picks changes up on the
 # next pane open, no service restart needed. Network-only, so runs even
 # in --quick mode; never fails the routine (see the script's own docstring).
+# 2026-10-09: the same run also rebuilds the picker's FREE tier (every model
+# that is $0 on OpenRouter tonight -> free-models.json) and refreshes the
+# USD->GBP rate the dashboard prices everything in.
 banner "AI Dashboard Pane Model Check"
 AI_PANES_CHECK="$ROOT/.local/bin/ai-panes-check.py"
 if [[ -f "$AI_PANES_CHECK" ]]; then
