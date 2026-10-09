@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.1 - 2026-10-09
+- Version number updates automatically on every merge (#11)
+
 ## 0.10.0 - 2026-10-09
 - Dashboard: the About panel shows the installed project version. The
   installer writes it next to the page and the nightly routine keeps it in
