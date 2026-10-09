@@ -54,6 +54,16 @@ if [[ ! -f "$PAGE" ]]; then
 fi
 [[ -f "$PAGE" ]] || { say "[FAIL] $PAGE missing (restore System-Recovery/desktop-dashboard/index.html)"; exit 1; }
 
+# Project version shown in the dashboard's About panel (click the logo). The
+# installer writes $SHARE/VERSION and records where its checkout lives in
+# source-repo; if that checkout is still around, follow its VERSION so the
+# panel stays right after a `git pull` without re-running the installer.
+SRC_REPO="$(cat "$HOME/.config/status-dashboard/source-repo" 2>/dev/null || true)"
+if [[ -n "$SRC_REPO" && -f "$SRC_REPO/VERSION" ]] && ! cmp -s "$SRC_REPO/VERSION" "$SHARE/VERSION"; then
+    cp "$SRC_REPO/VERSION" "$SHARE/VERSION"
+    say "[FIX]  dashboard version is now $(head -1 "$SHARE/VERSION")"
+fi
+
 # Screen size, so the window matches the display rather than assuming 1080p.
 GEO="1920,1080"
 if command -v kscreen-doctor >/dev/null 2>&1; then

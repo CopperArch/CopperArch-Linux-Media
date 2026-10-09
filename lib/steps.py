@@ -220,6 +220,13 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
         # conf dir: media-keys.env + netns-group.json
         conf = Path.home() / ".config/status-dashboard"
         conf.mkdir(parents=True, exist_ok=True)
+        # Project version for the dashboard's About panel, plus where this
+        # checkout lives so the nightly status-dashboard-install.sh can follow
+        # its VERSION after a `git pull`.
+        version_file = ctx.repo / "VERSION"
+        if version_file.exists():
+            (share / "VERSION").write_text(version_file.read_text())
+            (conf / "source-repo").write_text(str(ctx.repo) + "\n")
         keys = {
             "PROWLARR_KEY": "", "QBIT_PASS": ctx.profile.qbit_password,
             "DEEPSEEK_API_KEY": ctx.profile.openrouter_api_key,
