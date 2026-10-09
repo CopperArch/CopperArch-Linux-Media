@@ -340,6 +340,54 @@ def recent_restart_loops(containers):
     return loops
 
 
+def container_versions(names):
+    """{container: installed version} for the dashboard's click-to-reveal.
+
+    Images label themselves inconsistently, so in order of trust:
+      1. the org.opencontainers.image.version label (linuxserver, immich,
+         seerr, plex...) unless it's a placeholder ("latest") or a commit sha;
+      2. an <APP>_VERSION variable the image bakes into its environment
+         (NEXTCLOUD_VERSION, REDIS_VERSION, ...), matched on the image name;
+      3. the image tag when it is a real version rather than "latest";
+      4. failing all that, the date the image was built.
+    """
+    out = {}
+    if not names:
+        return out
+    try:
+        data = json.loads(run(["docker", "inspect"] + list(names), timeout=25) or "[]")
+    except Exception:
+        return out
+    placeholder = re.compile(r"^(latest|stable|main|master|nightly|unknown|)$|^[0-9a-f]{12,}", re.I)
+    for c in data:
+        name = (c.get("Name") or "").lstrip("/")
+        cfg = c.get("Config") or {}
+        labels = cfg.get("Labels") or {}
+        image = cfg.get("Image") or ""
+        base = image.rsplit("/", 1)[-1]
+        repo, _, tag = base.partition(":")
+        tag = tag.split("@")[0]
+        ver = (labels.get("org.opencontainers.image.version") or "").strip()
+        if placeholder.search(ver):
+            ver = ""
+        if not ver:
+            env = dict(e.split("=", 1) for e in (cfg.get("Env") or []) if "=" in e)
+            keys = [k for k in env if k.endswith("_VERSION") and env[k]
+                    and k[:-8].replace("_", "").lower() in
+                    (repo + name).replace("-", "").replace("_", "").lower()]
+            if keys:
+                ver = env[max(keys, key=len)]
+        if not ver and tag and not placeholder.search(tag):
+            ver = tag
+        if not ver:
+            built = (labels.get("org.opencontainers.image.created") or "")[:10]
+            if re.fullmatch(r"\d{4}-\d\d-\d\d", built):
+                ver = f"build {built}"
+        if name and ver:
+            out[name] = ver
+    return out
+
+
 def collect_docker():
     fmt = ("{{.Names}}\x1f{{.State}}\x1f{{.Status}}\x1f{{.Image}}"
            "\x1f{{.RunningFor}}\x1f{{.Ports}}")
@@ -378,6 +426,10 @@ def collect_docker():
             if n in containers:
                 containers[n]["restarts"] = int(p[1] or 0)
                 containers[n]["started_at"] = p[2]
+
+        for n, v in container_versions(names).items():
+            if n in containers:
+                containers[n]["version"] = v
 
     # Manual-approval update gate (docker-update-gate.py, run nightly from
     # daily-routine.sh §11) — a pending-update marker means a newer image has
