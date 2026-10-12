@@ -56,9 +56,9 @@ OLD="$(ip_now)"
 log "rotating; current exit ${OLD:-unknown}"
 
 cycle() {
-  ctrl PUT /v1/openvpn/status '{"status":"stopped"}' >/dev/null
+  ctrl PUT /v1/vpn/status '{"status":"stopped"}' >/dev/null
   sleep 3
-  ctrl PUT /v1/openvpn/status '{"status":"running"}' >/dev/null
+  ctrl PUT /v1/vpn/status '{"status":"running"}' >/dev/null
   # Wait for the tunnel to come back and hand us an address.
   for _ in $(seq 1 $((MAX_WAIT / 3))); do
     sleep 3

@@ -372,10 +372,11 @@ fi
 
 # ─── 8. Jellyfin duplicate removal + collection de-dup (DELETES losing files) ─
 banner "Jellyfin Duplicate Removal"
-JF_HELPER="$ROOT/.dbmedia/maintenance/jellyfin-duplicates.sh"
+JF_HELPER="$ROOT/.local/bin/jellyfin-duplicates.sh"
 if [[ -f "$JF_HELPER" ]]; then
     # --apply deletes lower-quality duplicate files from disk and removes
-    # repeated collections. Reads the API key from ~/.dbmedia/jellyfin-api-key.
+    # repeated collections. Reads the API key from ~/.dbmedia/jellyfin-api-key
+    # and skips itself until that file exists — creating it is the opt-in.
     bash "$JF_HELPER" --apply 2>&1 | tee -a "$LOG"
 else
     log "  [SKIP] $(basename "$JF_HELPER") not found"

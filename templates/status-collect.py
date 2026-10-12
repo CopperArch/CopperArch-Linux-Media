@@ -483,14 +483,42 @@ def collect_docker():
 
 
 # ── vpn ──────────────────────────────────────────────────────────────────────
+VPN_NAME_FILE = Path.home() / ".config/status-dashboard/vpn-name"
+VPN_PROVIDER_NAMES = {
+    "airvpn": "AirVPN", "cyberghost": "CyberGhost", "expressvpn": "ExpressVPN",
+    "fastestvpn": "FastestVPN", "hidemyass": "HideMyAss", "ipvanish": "IPVanish",
+    "ivpn": "IVPN", "nordvpn": "NordVPN", "private internet access":
+    "Private Internet Access", "privatevpn": "PrivateVPN", "protonvpn": "Proton VPN",
+    "purevpn": "PureVPN", "slickvpn": "SlickVPN", "torguard": "TorGuard",
+    "vpnsecure": "VPNSecure", "vpn unlimited": "VPN Unlimited",
+    "vyprvpn": "VyprVPN", "custom": "Custom VPN",
+}
+
+
 def collect_vpn():
-    """Exit IP from gluetun's own logs, plus the netns binding check."""
-    info = {"ip": None, "country": None, "city": None, "healthy": None,
+    """Active VPN + exit IP from gluetun, plus the netns binding check."""
+    info = {"provider": None, "vpn_type": None,
+            "ip": None, "country": None, "city": None, "healthy": None,
             "siblings": [], "siblings_ok": True}
 
     health = run(["docker", "inspect", "-f",
                   "{{.State.Health.Status}}", "gluetun"], timeout=10).strip()
     info["healthy"] = health or None
+
+    # Which VPN this is: provider + protocol from gluetun's own settings; the
+    # installer's label (~/.config/status-dashboard/vpn-name) wins when set,
+    # which is how a "custom" server gets a real name.
+    genv = dict(l.split("=", 1) for l in run(
+        ["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}",
+         "gluetun"], timeout=10).splitlines() if "=" in l)
+    prov = genv.get("VPN_SERVICE_PROVIDER", "").strip().lower()
+    try:
+        label = VPN_NAME_FILE.read_text().strip()
+    except OSError:
+        label = ""
+    info["provider"] = label or VPN_PROVIDER_NAMES.get(prov, prov.title()) or None
+    info["vpn_type"] = {"openvpn": "OpenVPN", "wireguard": "WireGuard"}.get(
+        genv.get("VPN_TYPE", "openvpn").strip().lower() or "openvpn")
 
     logs = run(["docker", "logs", "--tail", "400", "gluetun"], timeout=15)
     for line in reversed(logs.splitlines()):

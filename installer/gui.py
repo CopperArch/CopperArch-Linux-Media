@@ -32,7 +32,7 @@ class Wizard(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("CopperArch Media Server")
-        self.geometry("880x640")
+        self.geometry("880x800")
         self.configure(bg=BG)
         self.profile: Profile | None = None
         self.accept_steps: dict[str, bool] = {}
@@ -177,14 +177,27 @@ class Wizard(tk.Tk):
         p = self.profile
         self.para("Secrets are stored in chmod-600 files under ~/.config and in the\n"
                   "stack .env files — never in the scripts. Generated passwords are\n"
-                  "already filled in; overwrite only what you want to change.")
+                  "already filled in; overwrite only what you want to change.\n"
+                  "VPN: enter any provider gluetun supports (surfshark, mullvad,\n"
+                  "nordvpn, protonvpn, private internet access, windscribe, …) or\n"
+                  "'custom' for your own server, and fill in only the rows for the\n"
+                  "protocol you chose.")
         rows = tk.Frame(self.c, bg=BG)
         rows.pack(anchor="w", fill="x", pady=10)
         secret_fields = [
-            ("VPN username", "vpn_user"),
-            ("VPN password", "vpn_password"),
-            ("VPN provider", "vpn_provider"),
-            ("VPN countries", "vpn_server_countries"),
+            ("VPN provider (or 'custom')", "vpn_provider"),
+            ("VPN protocol (openvpn/wireguard)", "vpn_type"),
+            ("VPN countries (not for custom)", "vpn_server_countries"),
+            ("OpenVPN username", "vpn_user"),
+            ("OpenVPN password", "vpn_password"),
+            ("WireGuard private key", "vpn_wg_private_key"),
+            ("WireGuard address (10.x.x.x/32)", "vpn_wg_addresses"),
+            ("WireGuard pre-shared key (optional)", "vpn_wg_preshared_key"),
+            ("Custom: name on the dashboard", "vpn_name"),
+            ("Custom: .ovpn file path", "vpn_openvpn_config"),
+            ("Custom: WireGuard server public key", "vpn_wg_public_key"),
+            ("Custom: WireGuard server IP", "vpn_wg_endpoint_ip"),
+            ("Custom: WireGuard server port", "vpn_wg_endpoint_port"),
             ("Plex claim token", "plex_claim"),
             ("qBittorrent password", "qbit_password"),
             ("Nextcloud DB password", "nc_db_password"),

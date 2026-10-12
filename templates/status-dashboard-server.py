@@ -169,6 +169,15 @@ def fix_vpn_rotate(args):
     return rc == 0, out or "VPN exit rotated"
 
 
+def fix_vpn_fastest(args):
+    script = BIN / "gluetun-fastest.sh"
+    if not script.exists():
+        return False, "gluetun-fastest.sh not found"
+    # Up to 5 reconnect cycles at ~2.5min worst case each = budget generously.
+    rc, out = sh(["bash", str(script)], timeout=780)
+    return rc == 0, out or "settled on fastest exit found"
+
+
 def fix_selfheal(args):
     script = BIN / "media-stack-selfheal.py"
     if not script.exists():
@@ -396,6 +405,7 @@ FIXES = {
     "docker_restart": fix_docker_restart,
     "vpn_recreate": fix_vpn_recreate,
     "vpn_rotate": fix_vpn_rotate,
+    "vpn_fastest": fix_vpn_fastest,
     "selfheal": fix_selfheal,
     "prowlarr_testall": fix_prowlarr_testall,
     "cloudflare_unblock": fix_cloudflare_unblock,

@@ -135,6 +135,7 @@ def install_stacks(ctx: Ctx) -> tuple[bool, str]:
         if ctx.profile.use_vpn_stack:
             env = build_vpn_env(ctx.profile)
             write_secret_env(base / "vpn-stack/.env", env)
+            write_vpn_extras(ctx.profile, base / "vpn-stack")
         return True, f"rendered {len(done) + 2} files under {base}"
     return _exec_step(ctx, "render docker stacks", do)
 
@@ -185,16 +186,62 @@ def build_media_env(p: Profile) -> dict:
 
 
 def build_vpn_env(p: Profile) -> dict:
-    return {
-        "VPN_SERVICE_PROVIDER": p.vpn_provider,
-        "VPN_TYPE": "openvpn",
-        "OPENVPN_USER": p.vpn_user,
-        "OPENVPN_PASSWORD": p.vpn_password,
-        "SERVER_COUNTRIES": p.vpn_server_countries,
-        "QBT_USER": p.qbit_user,
-        "QBT_PASS": p.qbit_password,
-        "VNC_PW": p.vnc_pw,
-}
+    vtype = (p.vpn_type or "openvpn").strip().lower()
+    env = {
+        "VPN_SERVICE_PROVIDER": (p.vpn_provider or "").strip().lower(),
+        "VPN_TYPE": vtype,
+    }
+    if vtype == "wireguard":
+        env.update({"WIREGUARD_PRIVATE_KEY": p.vpn_wg_private_key,
+                    "WIREGUARD_ADDRESSES": p.vpn_wg_addresses,
+                    "WIREGUARD_PRESHARED_KEY": p.vpn_wg_preshared_key})
+        if p.vpn_is_custom:
+            env.update({"WIREGUARD_PUBLIC_KEY": p.vpn_wg_public_key,
+                        "WIREGUARD_ENDPOINT_IP": p.vpn_wg_endpoint_ip,
+                        "WIREGUARD_ENDPOINT_PORT": p.vpn_wg_endpoint_port})
+    else:
+        env.update({"OPENVPN_USER": p.vpn_user, "OPENVPN_PASSWORD": p.vpn_password})
+        if p.vpn_is_custom:
+            # the .ovpn itself is copied to vpn-stack/gluetun-custom/ by
+            # render_stacks and mounted read-only at this path
+            env["OPENVPN_CUSTOM_CONFIG"] = "/gluetun/custom/custom.ovpn"
+    if not p.vpn_is_custom:
+        # a custom server is one fixed endpoint — gluetun rejects server filters
+        env["SERVER_COUNTRIES"] = p.vpn_server_countries
+    env.update({"QBT_USER": p.qbit_user, "QBT_PASS": p.qbit_password,
+                "VNC_PW": p.vnc_pw})
+    return env
+
+
+def rotate_key() -> str:
+    """API key the dashboard/cron use on gluetun's control server."""
+    gdir = Path.home() / ".config/gluetun"
+    gdir.mkdir(parents=True, exist_ok=True)
+    key = gdir / "rotate.key"
+    if not key.exists():
+        import secrets as _s
+        key.write_text(_s.token_hex(16))
+        key.chmod(0o600)
+    return key.read_text().strip()
+
+
+def write_vpn_extras(p: Profile, vpn_dir: Path) -> None:
+    """Files gluetun bind-mounts: control-server auth + a custom .ovpn."""
+    auth = vpn_dir / "gluetun-auth"
+    auth.mkdir(parents=True, exist_ok=True)
+    cfg = auth / "config.toml"
+    cfg.write_text('[[roles]]\nname = "rotator"\n'
+                   'routes = ["GET /v1/publicip/ip", "GET /v1/vpn/status", '
+                   '"PUT /v1/vpn/status"]\n'
+                   f'auth = "apikey"\napikey = "{rotate_key()}"\n')
+    cfg.chmod(0o600)
+    custom = vpn_dir / "gluetun-custom"
+    custom.mkdir(parents=True, exist_ok=True)
+    if p.vpn_is_custom and (p.vpn_type or "").lower() != "wireguard" and p.vpn_openvpn_config:
+        import shutil
+        dst = custom / "custom.ovpn"
+        shutil.copyfile(Path(p.vpn_openvpn_config).expanduser(), dst)
+        dst.chmod(0o600)
 
 
 def write_secret_env(path: Path, env: dict) -> None:
@@ -263,14 +310,10 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
                 "MAIL_FROM": ctx.profile.mail_from or ctx.profile.smtp_user,
                 "MAIL_TO": ctx.profile.mail_to})
         # gluetun rotate key
-        if ctx.profile.use_vpn_stack and ctx.profile.vpn_rotate_hourly:
-            gdir = Path.home() / ".config/gluetun"
-            gdir.mkdir(parents=True, exist_ok=True)
-            key = gdir / "rotate.key"
-            if not key.exists():
-                import secrets as _s
-                key.write_text(_s.token_hex(16))
-                key.chmod(0o600)
+        if ctx.profile.use_vpn_stack:
+            rotate_key()
+            # name of the active VPN, shown on the dashboard's VPN card
+            (conf / "vpn-name").write_text(ctx.profile.vpn_label + "\n")
         # docker-log-clean (root-owned helper) + routine sudo rules
         etc = ctx.tpl / "etc"
         if (etc / "docker-log-clean.sh").exists():
