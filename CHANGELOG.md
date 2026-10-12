@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.2 - 2026-10-12
+- Rename state dir to ~/.dbmedia; port self-heal and auto-update fixes (#12)
+
 ## 0.10.1 - 2026-10-09
 - Version number updates automatically on every merge (#11)
 
