@@ -887,6 +887,7 @@ const FIX_INFO = {
   docker_restart:    "Restarting the container. If it's gluetun, this is rerouted into a full VPN-group recreate instead — restarting gluetun alone would strip networking from the containers sharing its namespace.",
   vpn_recreate:       "Force-recreating gluetun and the 7 containers sharing its network namespace (qbittorrent, prowlarr, radarr, sonarr, flaresolverr, chrome, jellyseerr) together, so none of them lose networking.",
   vpn_rotate:         "Requesting a new VPN exit IP from the gluetun control server.",
+  vpn_fastest:        "Cycling the VPN exit up to 5 times, measuring ping through the tunnel after each reconnect, and stopping as soon as one comes back under 35ms (or settling on the best of the batch if none do).",
   selfheal:           "Running the nightly self-heal pass: re-enforcing Prowlarr indexer seeder/priority settings across all 3 config layers, checking download pipeline throughput, blocklisting dead/stalled downloads, and verifying indexers aren't silently Cloudflare-blocked. This is the heaviest fix — it makes several sequential API calls and can take up to 15 minutes.",
   prowlarr_testall:   "Asking Prowlarr to test every indexer and reporting which ones still fail validation.",
   cloudflare_unblock: "Rotating the VPN exit IP (up to 3 attempts, ~15s apart) to escape a Cloudflare IP/range ban, probing the blocked host after each rotation, then re-testing all indexers.",
@@ -1258,7 +1259,11 @@ function renderServices(d){
     const bad = v.healthy!=="healthy" || !v.siblings_ok;
     out += `<div class="row"><span class="dot ${bad?"f":""}"></span><span class="k">VPN exit</span>
             <span class="v">${esc(v.ip||"?")} <span class="muted">${esc(v.country||"")}</span></span></div>
-            <div class="row tiny"><span class="k">gluetun</span><span class="v">${esc(v.healthy||"?")} · netns ${v.siblings_ok?"bound ✓":"<span class='stale'>BROKEN</span>"}</span></div>`;
+            <div class="row tiny"><span class="k">gluetun</span><span class="v">${esc(v.healthy||"?")} · netns ${v.siblings_ok?"bound ✓":"<span class='stale'>BROKEN</span>"}</span></div>
+            <div class="row tiny" style="justify-content:flex-end;gap:6px">
+              <button class="fixbtn" id="vpn-rotate-btn" title="${esc(FIX_INFO.vpn_rotate)}">Change IP</button>
+              <button class="fixbtn" id="vpn-fastest-btn" title="${esc(FIX_INFO.vpn_fastest)}">⚡ Fastest</button>
+            </div>`;
     const unbound=(v.siblings||[]).filter(x=>!x.bound);
     for(const u of unbound) out += `<div class="row tiny"><span class="k stale">${esc(u.name)} not in gluetun netns</span></div>`;
   }
@@ -1268,6 +1273,13 @@ function renderServices(d){
             <span class="v tiny">${x.code==null?"down":x.code} · ${x.ms}ms</span></div>`;
   }
   $("services").innerHTML = out;
+
+  const rb = document.getElementById("vpn-rotate-btn");
+  if(rb) rb.onclick = () => runFixes(
+    [{id:"vpn_rotate", label:"Change VPN IP"}], "Requesting a new VPN exit IP…", rb);
+  const fb = document.getElementById("vpn-fastest-btn");
+  if(fb) fb.onclick = () => runFixes(
+    [{id:"vpn_fastest", label:"Connect to fastest VPN exit"}], "Finding the fastest VPN exit…", fb);
 }
 
 function renderRoutine(d){

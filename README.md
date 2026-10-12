@@ -91,7 +91,8 @@ Notes:
 1. **systemd** — dashboard server/terminal units run with `Restart=always`,
    the collector runs every 60s from a timer.
 2. **Dashboard repairs** — the web dashboard exposes a closed whitelist of
-   fixes (container start/restart, VPN recreate/rotate, Prowlarr test-all,
+   fixes (container start/restart, VPN recreate/rotate/find-fastest-exit,
+   Prowlarr test-all,
    Cloudflare-ban unblock, apt upgrade, quick routine, container-update
    apply/skip). Guards: loopback binding, `Sec-Fetch-Site`/Origin CSRF
    checks, 64 KB body cap, confirmed reboot endpoint, argv-list execution
@@ -130,6 +131,13 @@ Notes:
    stuck failing auth in a loop.
 
    The routine also keeps the media libraries tidy:
+   `jellyfin-duplicates.sh` finds the same movie or episode stored twice,
+   keeps the best copy (resolution, then bitrate, then size) and **deletes
+   the others from disk** — it is off until you create a Jellyfin API key in
+   `~/.dbmedia/jellyfin-api-key`; run it by hand without `--apply` to see
+   what it would remove. Copies Sonarr/Radarr track are removed through
+   their API so the kept copy is adopted rather than re-downloaded, and
+   titles whose running times disagree are reported, never deleted.
    `media-library-sort.py` moves TV episodes that landed in the movies
    folder (and movies in the TV folder) to the right place — renames on the
    same disk only, never overwrites, skips anything Radarr/Sonarr manage or
