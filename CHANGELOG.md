@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.4 - 2026-10-12
+- Dashboard: Change VPN provider (#14)
+
 ## 0.10.3 - 2026-10-12
 - Jellyfin duplicate remover, 'Fastest' VPN button, and a choice of VPN provider (#13)
 
