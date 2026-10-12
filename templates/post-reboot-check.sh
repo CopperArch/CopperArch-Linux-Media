@@ -3,7 +3,7 @@
 #
 # Runs automatically once after the next boot (see post-reboot-check.service,
 # which this script disables again when it finishes, so it never fires twice).
-# Writes a timestamped report to ~/.hermes/maintenance-logs/post-reboot-*.log
+# Writes a timestamped report to ~/.dbmedia/maintenance-logs/post-reboot-*.log
 # so the evidence is waiting even if nobody is watching the screen.
 #
 #   post-reboot-check.sh          # run the checks now
@@ -11,7 +11,7 @@ set -uo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 ROOT="{{HOME}}"
-LOG="$ROOT/.hermes/maintenance-logs/post-reboot-$(date +%Y%m%d-%H%M%S).log"
+LOG="$ROOT/.dbmedia/maintenance-logs/post-reboot-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
 

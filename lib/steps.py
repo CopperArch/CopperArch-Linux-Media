@@ -207,6 +207,11 @@ def write_secret_env(path: Path, env: dict) -> None:
 # ── 4. local scripts + units + dashboard page ───────────────────────────────
 def install_scripts(ctx: Ctx) -> tuple[bool, str]:
     def do(ctx):
+        # State dir was ~/.hermes before 0.10.2 — carry an existing one over
+        # so keys, logs and update state survive the rename.
+        old_state, new_state = Path.home() / ".hermes", Path.home() / ".dbmedia"
+        if old_state.is_dir() and not new_state.exists():
+            old_state.rename(new_state)
         bin_dir = Path.home() / ".local/bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         n = 0
@@ -248,7 +253,7 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
                 "DUCKDNS_TOKEN": ctx.profile.duckdns_token})
         # alerts
         if ctx.profile.use_alerts and ctx.profile.smtp_host:
-            hdir = Path.home() / ".hermes"
+            hdir = Path.home() / ".dbmedia"
             hdir.mkdir(parents=True, exist_ok=True)
             write_secret_env(hdir / "alert-email.conf", {
                 "SMTP_HOST": ctx.profile.smtp_host,

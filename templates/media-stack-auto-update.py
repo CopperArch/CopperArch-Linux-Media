@@ -24,7 +24,7 @@ ROOT = Path.home()
 VPN_DIR = ROOT / "docker/vpn-stack"
 MEDIA_DIR = ROOT / "docker/media-stack"
 BACKUP_DIR = ROOT / "backups/auto-update"
-STATE_DIR = ROOT / ".hermes/state/auto-update"
+STATE_DIR = ROOT / ".dbmedia/state/auto-update"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -87,7 +87,7 @@ def flush_alerts():
                f"[homelab] {len(WARNINGS)} auto-update warning(s) on {host}")
     body = ("media-stack-auto-update.py reported:\n\n"
             + "\n".join(f"  - {w}" for w in WARNINGS)
-            + "\n\nFull log: ~/.hermes/maintenance-logs/daily-routine-*.log\n")
+            + "\n\nFull log: ~/.dbmedia/maintenance-logs/daily-routine-*.log\n")
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "send-alert.py")
         spec = importlib.util.spec_from_file_location("send_alert", path)
@@ -373,7 +373,31 @@ def compose(svc, *args, timeout=120):
     return sh(["docker", "compose", *args], cwd=svc["compose_dir"], timeout=timeout)
 
 
-def verify_arr(svc, timeout=60):
+def get_arr_health_errors(svc, timeout=10):
+    """Best-effort single-shot fetch of current health-API error messages.
+    Returns a set of messages, or None if the API couldn't be reached at all
+    (e.g. mid-restart) — callers should treat None as "no baseline available"
+    rather than "zero errors"."""
+    key = get_arr_api_key(svc["name"])
+    if not key:
+        return None
+    status, body = http_get(f"http://localhost:{svc['port']}{svc['api_base']}/health",
+                             timeout=timeout, headers={"X-Api-Key": key})
+    if status != 200:
+        return None
+    try:
+        issues = json.loads(body)
+    except Exception:
+        return None
+    return {i["message"] for i in issues if i.get("type") == "error"}
+
+
+def verify_arr(svc, baseline_errors=None, timeout=60):
+    # Some health-API "error" entries (e.g. RemovedSeriesCheck flagging a
+    # series TheTVDB deleted upstream) reflect stale library/metadata state,
+    # not container health, and persist across restarts regardless of which
+    # image is running. Comparing against a pre-update baseline keeps those
+    # from causing a false "update broke it" / rollback-CRITICAL alert.
     deadline = time.time() + timeout
     key = None
     while time.time() < deadline:
@@ -388,9 +412,13 @@ def verify_arr(svc, timeout=60):
                     issues = None
                 if issues is not None:
                     errors = [i for i in issues if i.get("type") == "error"]
-                    if errors:
-                        return False, f"health API reports errors: {[e['message'] for e in errors]}"
-                    return True, "health API clean"
+                    new_errors = errors if baseline_errors is None else [
+                        e for e in errors if e["message"] not in baseline_errors
+                    ]
+                    if new_errors:
+                        return False, f"health API reports new errors: {[e['message'] for e in new_errors]}"
+                    return True, "health API clean" if not errors else \
+                        f"health API clean (ignoring {len(errors)} pre-existing error(s) unrelated to the update)"
         time.sleep(3)
     return False, "app never came up / API key unreadable within timeout"
 
@@ -494,6 +522,7 @@ def process(svc):
             f"rather than skipping it forever")
 
     log(f"{name}: new image found ({old_id[:19]} -> {new_id[:19]}), updating")
+    baseline_errors = get_arr_health_errors(svc) if svc["kind"] == "arr" else None
     backup_config(svc)
 
     rc, out = compose(svc, "up", "-d", "--no-deps", name)
@@ -502,7 +531,7 @@ def process(svc):
         return
 
     verifier = VERIFIERS[svc["kind"]]
-    ok, detail = verifier(svc)
+    ok, detail = verifier(svc, baseline_errors=baseline_errors) if svc["kind"] == "arr" else verifier(svc)
     restarting, dstatus = container_restarting(name)
     if ok and not restarting:
         log(f"{name}: [OK] update verified ({detail})")
@@ -536,7 +565,7 @@ def process(svc):
         save_state(name, state)
         return
 
-    ok2, detail2 = verifier(svc)
+    ok2, detail2 = verifier(svc, baseline_errors=baseline_errors) if svc["kind"] == "arr" else verifier(svc)
     if ok2:
         warn(f"{name}: rolled back successfully, previous version restored and verified ({detail2})")
     else:

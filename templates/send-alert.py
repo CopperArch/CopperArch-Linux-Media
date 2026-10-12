@@ -4,7 +4,7 @@ send-alert.py — minimal SMTP alert sender for this box's maintenance jobs.
 
 Stdlib only (no msmtp/ssmtp/sendmail installed here, and none needed).
 
-Credentials are NOT stored in this file: it reads ~/.hermes/alert-email.conf
+Credentials are NOT stored in this file: it reads ~/.dbmedia/alert-email.conf
 (chmod 600), so this script stays safe to sync to Nextcloud/System-Recovery
 alongside the rest of ~/.local/bin. Config format is plain KEY=VALUE lines:
 
@@ -35,7 +35,7 @@ import sys
 from email.message import EmailMessage
 from email.utils import formatdate
 
-CONF = os.path.expanduser("~/.hermes/alert-email.conf")
+CONF = os.path.expanduser("~/.dbmedia/alert-email.conf")
 PLACEHOLDER = "PUT_GOOGLE_APP_PASSWORD_HERE"
 
 
