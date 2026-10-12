@@ -400,12 +400,320 @@ def fix_restart_unit(args):
         "\n(system-level units must be restarted manually with sudo)"
 
 
+# ── change VPN provider ──────────────────────────────────────────────────────
+# What the dashboard's "Change provider" dialog drives. gluetun's settings are
+# the VPN_* / OPENVPN_* / WIREGUARD_* lines of the vpn-stack .env file; changing
+# provider means rewriting those and recreating gluetun together with every
+# container that shares its network namespace (recreating gluetun alone leaves
+# the others attached to a namespace that no longer exists).
+VPN_PROVIDERS = {
+    "airvpn": "AirVPN", "cyberghost": "CyberGhost", "expressvpn": "ExpressVPN",
+    "fastestvpn": "FastestVPN", "giganews": "Giganews", "hidemyass": "HideMyAss",
+    "ipvanish": "IPVanish", "ivpn": "IVPN", "mullvad": "Mullvad",
+    "nordvpn": "NordVPN", "perfect privacy": "Perfect Privacy",
+    "privado": "Privado", "private internet access": "Private Internet Access",
+    "privatevpn": "PrivateVPN", "protonvpn": "Proton VPN", "purevpn": "PureVPN",
+    "slickvpn": "SlickVPN", "surfshark": "Surfshark", "torguard": "TorGuard",
+    "vpnsecure": "VPNSecure", "vpn unlimited": "VPN Unlimited",
+    "vyprvpn": "VyprVPN", "windscribe": "Windscribe", "custom": "Custom / my own server",
+}
+_VPN_ENV_KEYS = (
+    "VPN_SERVICE_PROVIDER", "VPN_TYPE", "OPENVPN_USER", "OPENVPN_PASSWORD",
+    "OPENVPN_CUSTOM_CONFIG", "WIREGUARD_PRIVATE_KEY", "WIREGUARD_ADDRESSES",
+    "WIREGUARD_PRESHARED_KEY", "WIREGUARD_PUBLIC_KEY", "WIREGUARD_ENDPOINT_IP",
+    "WIREGUARD_ENDPOINT_PORT", "SERVER_COUNTRIES")
+_ENV_FILE = COMPOSE_DIR / ".env"
+_COMPOSE_FILE = COMPOSE_DIR / "docker-compose.yml"
+_VPN_NAME_FILE = Path.home() / ".config/status-dashboard/vpn-name"
+_WG_KEY = re.compile(r"[A-Za-z0-9+/]{43}=")
+_WG_ADDRS = re.compile(r"[0-9A-Fa-f:./, ]{7,120}")
+_IPV4 = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}")
+
+
+def _env_unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+        v = v[1:-1].replace("\\'", "'") if v[0] == "'" else v[1:-1]
+    return v
+
+
+def _env_quote(v):
+    """Single quotes: docker compose reads those literally, so a password
+    containing $ or # is not interpolated or cut short."""
+    if re.fullmatch(r"[A-Za-z0-9_.,:/@+=-]*", v):
+        return v
+    return "'" + v.replace("'", "\\'") + "'"
+
+
+def _read_env_file():
+    env = {}
+    try:
+        for line in _ENV_FILE.read_text().splitlines():
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s:
+                k, _, v = s.partition("=")
+                env[k.strip()] = _env_unquote(v)
+    except OSError:
+        pass
+    return env
+
+
+def vpn_provider_info():
+    """Current provider for the dialog. Never returns a credential -- only
+    whether one is stored, so the form can say "leave blank to keep"."""
+    env = _read_env_file()
+    try:
+        name = _VPN_NAME_FILE.read_text().strip()
+    except OSError:
+        name = ""
+    return {
+        "provider": env.get("VPN_SERVICE_PROVIDER", "").lower(),
+        "type": (env.get("VPN_TYPE") or "openvpn").lower(),
+        "countries": env.get("SERVER_COUNTRIES", ""),
+        "name": name,
+        "has_openvpn_login": bool(env.get("OPENVPN_USER")),
+        "has_wireguard_key": bool(env.get("WIREGUARD_PRIVATE_KEY")),
+        "providers": [{"id": k, "label": v} for k, v in VPN_PROVIDERS.items()],
+    }
+
+
+def _vpn_change_plan(a, current):
+    """Validate the dialog's fields. Returns (env, ovpn_text, name) or raises
+    ValueError with a message for the person who filled the form in."""
+    def field(key, limit=400):
+        v = a.get(key, "")
+        if not isinstance(v, str) or len(v) > limit or re.search(r"[\r\n\0]", v):
+            raise ValueError(f"{key}: not a usable value")
+        return v.strip()
+
+    provider = field("provider").lower()
+    if provider not in VPN_PROVIDERS:
+        raise ValueError("pick a provider from the list")
+    vtype = field("type").lower()
+    if vtype not in ("openvpn", "wireguard"):
+        raise ValueError("connection type must be OpenVPN or WireGuard")
+    custom = provider == "custom"
+    same = (provider == current.get("VPN_SERVICE_PROVIDER", "").lower()
+            and vtype == (current.get("VPN_TYPE") or "openvpn").lower())
+    env = {k: "" for k in _VPN_ENV_KEYS}
+    env["VPN_SERVICE_PROVIDER"], env["VPN_TYPE"] = provider, vtype
+    ovpn = None
+
+    if vtype == "openvpn":
+        user, password = field("openvpn_user"), field("openvpn_password")
+        if not user and not password and same:
+            # same provider, credentials left blank: keep the stored ones
+            user = current.get("OPENVPN_USER", "")
+            password = current.get("OPENVPN_PASSWORD", "")
+        if custom:
+            ovpn = a.get("ovpn", "")
+            if not isinstance(ovpn, str) or len(ovpn) > 65536:
+                raise ValueError("the .ovpn file is missing or too large")
+            if not re.search(r"^\s*remote\s+\S+", ovpn, re.M):
+                if not (same and (COMPOSE_DIR / "gluetun-custom/custom.ovpn").exists()):
+                    raise ValueError("paste the contents of your .ovpn file "
+                                     "(it has to contain a 'remote' line)")
+                ovpn = None            # keep the one already installed
+            env["OPENVPN_CUSTOM_CONFIG"] = "/gluetun/custom/custom.ovpn"
+        elif not (user and password):
+            raise ValueError("this provider needs its OpenVPN username and "
+                             "password (the service credentials from its "
+                             "manual-setup page, not your account login)")
+        env["OPENVPN_USER"], env["OPENVPN_PASSWORD"] = user, password
+    else:
+        key = field("wg_private_key")
+        addrs = field("wg_addresses")
+        psk = field("wg_preshared_key")
+        if not key and same:
+            key = current.get("WIREGUARD_PRIVATE_KEY", "")
+            addrs = addrs or current.get("WIREGUARD_ADDRESSES", "")
+            psk = psk or current.get("WIREGUARD_PRESHARED_KEY", "")
+        if not _WG_KEY.fullmatch(key):
+            raise ValueError("WireGuard private key is missing or not a key")
+        if not _WG_ADDRS.fullmatch(addrs):
+            raise ValueError("WireGuard address is missing (e.g. 10.64.222.21/32)")
+        if psk and not _WG_KEY.fullmatch(psk):
+            raise ValueError("WireGuard pre-shared key is not a key")
+        env.update(WIREGUARD_PRIVATE_KEY=key, WIREGUARD_ADDRESSES=addrs,
+                   WIREGUARD_PRESHARED_KEY=psk)
+        if custom:
+            pub, ip, port = (field("wg_public_key"), field("wg_endpoint_ip"),
+                             field("wg_endpoint_port") or "51820")
+            if not _WG_KEY.fullmatch(pub):
+                raise ValueError("the server's WireGuard public key is missing or not a key")
+            if not _IPV4.fullmatch(ip):
+                raise ValueError("the server address must be an IP address "
+                                 "(gluetun does not accept a hostname here)")
+            if not (port.isdigit() and 0 < int(port) < 65536):
+                raise ValueError("the server port must be a number")
+            env.update(WIREGUARD_PUBLIC_KEY=pub, WIREGUARD_ENDPOINT_IP=ip,
+                       WIREGUARD_ENDPOINT_PORT=port)
+
+    if not custom:
+        countries = field("countries", 200)
+        if countries and not re.fullmatch(r"[A-Za-z .,'()-]+", countries):
+            raise ValueError("countries: names separated by commas, e.g. Netherlands, Sweden")
+        env["SERVER_COUNTRIES"] = countries
+    name = field("name", 40)
+    if name and not re.fullmatch(r"[\w .,'()&+-]+", name):
+        raise ValueError("name: letters, digits and simple punctuation only")
+    return env, ovpn, name
+
+
+def _compose_with_vpn_vars(text, env, need_custom_mount):
+    """The compose file as it must be for `env` to reach gluetun: an install
+    made before WireGuard/custom support only passes the OpenVPN variables
+    through. Returns the (possibly unchanged) text, or raises ValueError when
+    the file is not laid out the way the installer writes it."""
+    lines = text.splitlines()
+    anchor = next((i for i, l in enumerate(lines)
+                   if re.match(r"\s*- VPN_TYPE=", l)), None)
+    if anchor is None:
+        raise ValueError("docker-compose.yml has no gluetun VPN_TYPE line to "
+                         "extend -- edit it by hand or re-run the installer")
+    indent = re.match(r"\s*", lines[anchor]).group(0)
+    add = [f"{indent}- {k}=${{{k}:-}}" for k, v in env.items()
+           if v and not re.search(rf"^\s*- {k}=", text, re.M)]
+    lines[anchor + 1:anchor + 1] = add
+    if need_custom_mount and "/gluetun/custom" not in text:
+        vol = next((i for i, l in enumerate(lines)
+                    if re.match(r"\s*- gluetun_data:/gluetun\s*$", l)), None)
+        if vol is None:
+            raise ValueError("docker-compose.yml has no gluetun volume list to "
+                             "add the .ovpn file to -- re-run the installer")
+        vindent = re.match(r"\s*", lines[vol]).group(0)
+        lines.insert(vol + 1, f"{vindent}- ./gluetun-custom:/gluetun/custom:ro")
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+def _env_file_with(env):
+    """.env with the VPN keys replaced and everything else left as it is."""
+    try:
+        old = _ENV_FILE.read_text().splitlines()
+    except OSError:
+        old = []
+    out, seen = [], set()
+    for line in old:
+        k = line.partition("=")[0].strip()
+        if k in env and not line.lstrip().startswith("#"):
+            if k not in seen:
+                out.append(f"{k}={_env_quote(env[k])}")
+                seen.add(k)
+            continue
+        out.append(line)
+    out += [f"{k}={_env_quote(v)}" for k, v in env.items() if k not in seen and v]
+    return "\n".join(out) + "\n"
+
+
+def _vpn_group_up():
+    present = known_containers()
+    group = [c for c in [_NETNS_HUB] + NETNS_GROUP if c in present]
+    return sh(["docker", "compose", "--project-directory", str(COMPOSE_DIR),
+               "up", "-d", "--force-recreate"] + (group or [_NETNS_HUB]),
+              timeout=600)
+
+
+def _vpn_exit_ip(wait=150):
+    """The tunnel's public address once it connects, or '' after `wait` s."""
+    end = time.time() + wait
+    while time.time() < end:
+        if _cancel.is_set():
+            return ""
+        rc, out = sh(["docker", "exec", _NETNS_HUB, "wget", "-qO-",
+                      "--timeout=8", "https://api.ipify.org"], timeout=20)
+        ip = out.strip()
+        if rc == 0 and re.fullmatch(r"[0-9A-Fa-f:.]{3,45}", ip):
+            return ip
+        time.sleep(5)
+    return ""
+
+
+def fix_vpn_change_provider(args):
+    if not _ENV_FILE.is_file() or not _COMPOSE_FILE.is_file():
+        return False, f"no VPN stack found in {COMPOSE_DIR}"
+    current = _read_env_file()
+    try:
+        env, ovpn, name = _vpn_change_plan(args, current)
+        old_compose = _COMPOSE_FILE.read_text()
+        new_compose = _compose_with_vpn_vars(old_compose, env, ovpn is not None
+                                             or bool(env["OPENVPN_CUSTOM_CONFIG"]))
+    except ValueError as e:
+        return False, str(e)
+
+    label = VPN_PROVIDERS[env["VPN_SERVICE_PROVIDER"]]
+    old_env = _ENV_FILE.read_text()
+    old_ip = _vpn_exit_ip(wait=1)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    custom_file = COMPOSE_DIR / "gluetun-custom/custom.ovpn"
+    old_ovpn = custom_file.read_text() if custom_file.exists() else None
+
+    def write(env_text, compose_text, ovpn_text):
+        tmp = _ENV_FILE.with_name(".env.new")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(env_text)
+        tmp.replace(_ENV_FILE)
+        if compose_text != _COMPOSE_FILE.read_text():
+            _COMPOSE_FILE.write_text(compose_text)
+        if ovpn_text is not None:
+            custom_file.parent.mkdir(parents=True, exist_ok=True)
+            custom_file.write_text(ovpn_text)
+            custom_file.chmod(0o600)
+
+    # Keep what worked: the dated copies stay on disk, and a new VPN that
+    # does not connect is undone below without being asked.
+    bak = _ENV_FILE.with_name(f".env.bak-{stamp}")
+    bak.write_text(old_env)
+    bak.chmod(0o600)
+    if new_compose != old_compose:
+        _COMPOSE_FILE.with_name(f"docker-compose.yml.bak-{stamp}").write_text(old_compose)
+
+    def restore(why):
+        write(old_env, old_compose, old_ovpn)
+        rc, _ = _vpn_group_up()
+        back = _vpn_exit_ip() if rc == 0 else ""
+        tail = (f"The previous VPN was put back and is connected again ({back})."
+                if back else
+                "The previous settings were put back, but the VPN has not "
+                "reconnected yet -- use 'Recreate VPN group' if it stays down.")
+        return False, f"{why}\n{tail}"
+
+    write(_env_file_with(env), new_compose, ovpn)
+    rc, out = sh(["docker", "compose", "--project-directory", str(COMPOSE_DIR),
+                  "config", "-q"], timeout=60)
+    if rc != 0:
+        write(old_env, old_compose, old_ovpn)
+        return False, ("docker compose rejected the new settings, nothing was "
+                       f"restarted:\n{out[-600:]}")
+    rc, out = _vpn_group_up()
+    if rc != 0:
+        return restore(f"The VPN containers did not start with {label}:\n{out[-600:]}")
+    ip = _vpn_exit_ip()
+    if not ip:
+        _, logs = sh(["docker", "logs", "--tail", "25", _NETNS_HUB], timeout=30)
+        return restore(f"{label} did not connect within 2½ minutes. gluetun's "
+                       f"last lines:\n{logs[-1500:]}")
+    try:
+        if name:
+            _VPN_NAME_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _VPN_NAME_FILE.write_text(name + "\n")
+        else:
+            _VPN_NAME_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return True, (f"Now connected through {name or label} "
+                  f"({env['VPN_TYPE']}), exit address {ip}"
+                  + (f" (was {old_ip})" if old_ip and old_ip != ip else "")
+                  + f". The previous settings are saved as {bak.name}.")
+
+
 FIXES = {
     "docker_start": fix_docker_start,
     "docker_restart": fix_docker_restart,
     "vpn_recreate": fix_vpn_recreate,
     "vpn_rotate": fix_vpn_rotate,
     "vpn_fastest": fix_vpn_fastest,
+    "vpn_change_provider": fix_vpn_change_provider,
     "selfheal": fix_selfheal,
     "prowlarr_testall": fix_prowlarr_testall,
     "cloudflare_unblock": fix_cloudflare_unblock,
@@ -620,6 +928,8 @@ class Handler(SimpleHTTPRequestHandler):
         if route == "/api/job":
             with _job_lock:
                 return self._json(200, dict(_job))
+        if route == "/api/vpn-provider":
+            return self._json(200, vpn_provider_info())
         if route == "/api/panes":
             return self._json(200, {"panes": available_panes()})
         if route == "/api/ask-targets":
