@@ -54,9 +54,9 @@ ip_now() {
 }
 
 cycle() {
-  ctrl PUT /v1/openvpn/status '{"status":"stopped"}' >/dev/null
+  ctrl PUT /v1/vpn/status '{"status":"stopped"}' >/dev/null
   sleep 3
-  ctrl PUT /v1/openvpn/status '{"status":"running"}' >/dev/null
+  ctrl PUT /v1/vpn/status '{"status":"running"}' >/dev/null
   for _ in $(seq 1 $((MAX_WAIT / 3))); do
     sleep 3
     NEW="$(ip_now)"

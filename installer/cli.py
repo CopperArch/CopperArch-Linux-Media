@@ -15,9 +15,48 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lib.platform import Platform
-from lib.profile import Profile
+from lib.profile import VPN_PROVIDERS, Profile
 from lib.steps import run_all
 from lib.util import Sudo, confirm, log
+
+
+def ask_vpn(p: Profile) -> None:
+    """Which VPN: a provider gluetun knows, or 'custom' for your own server."""
+    names = sorted(k for k in VPN_PROVIDERS if k != "custom")
+    print("\nVPN providers with built-in server lists:\n  " + ", ".join(names) +
+          "\n  ...or 'custom' for your own server / a provider not listed.")
+    while True:
+        p.vpn_provider = _in("VPN provider", p.vpn_provider).strip().lower()
+        if p.vpn_provider in VPN_PROVIDERS:
+            break
+        print(f"  '{p.vpn_provider}' is not on the list — type 'custom' to use it "
+              "with its own OpenVPN/WireGuard config.")
+    while True:
+        p.vpn_type = _in("VPN protocol (openvpn/wireguard)", p.vpn_type).strip().lower()
+        if p.vpn_type in ("openvpn", "wireguard"):
+            break
+    custom = p.vpn_is_custom
+    if custom:
+        p.vpn_name = _in("Name to show on the dashboard (e.g. 'Home server')", p.vpn_name)
+    if p.vpn_type == "wireguard":
+        p.vpn_wg_private_key = _in("WireGuard private key", secret=True)
+        p.vpn_wg_addresses = _in("WireGuard address (e.g. 10.64.222.21/32)", p.vpn_wg_addresses)
+        p.vpn_wg_preshared_key = _in("WireGuard pre-shared key (blank if none)", secret=True)
+        if custom:
+            p.vpn_wg_public_key = _in("Server public key", p.vpn_wg_public_key)
+            p.vpn_wg_endpoint_ip = _in("Server IP address", p.vpn_wg_endpoint_ip)
+            p.vpn_wg_endpoint_port = _in("Server port", p.vpn_wg_endpoint_port)
+    else:
+        if custom:
+            p.vpn_openvpn_config = _in("Path to your .ovpn file", p.vpn_openvpn_config)
+        p.vpn_user = _in("VPN username" + (" (blank if the .ovpn needs none)" if custom else ""),
+                         secret=False)
+        p.vpn_password = _in("VPN password", secret=True)
+    if custom:
+        # one fixed server: there is no pool of exits to rotate through
+        p.vpn_rotate_hourly = False
+    else:
+        p.vpn_server_countries = _in("VPN server countries", p.vpn_server_countries)
 
 
 def ask_questions(p: Profile) -> Profile:
@@ -36,10 +75,7 @@ def ask_questions(p: Profile) -> Profile:
 
     if confirm("Install the VPN download stack (gluetun/qBittorrent/Sonarr/Radarr)?"):
         p.use_vpn_stack = True
-        p.vpn_provider = _in("VPN provider (surfshark/mullvad/...)", p.vpn_provider)
-        p.vpn_user = _in("VPN username", secret=False)
-        p.vpn_password = _in("VPN password", secret=True)
-        p.vpn_server_countries = _in("VPN server countries", p.vpn_server_countries)
+        ask_vpn(p)
     if confirm("Install the media stack (Plex/Jellyfin/Immich/Nextcloud/seerr/Caddy)?"):
         p.use_media_stack = True
         if confirm("Do you have a Plex claim token (plex.tv/claim)?"):
@@ -66,7 +102,7 @@ def ask_questions(p: Profile) -> Profile:
 def _in(q, default="", secret=False):
     from getpass import getpass
     if secret:
-        v = getpass.getpass(f"{q}: ")
+        v = getpass(f"{q}: ")
         return v or default
     v = input(f"{q} [{default}]: ").strip()
     return v or default

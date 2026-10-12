@@ -86,6 +86,30 @@ Notes:
   (they cover apt-get); on other distros the routine's package-update step
   is skipped by the routine itself.
 
+## Choosing your VPN
+
+The VPN stack runs on [gluetun](https://github.com/qdm12/gluetun), so the
+installer takes any provider gluetun has a server list for — AirVPN,
+CyberGhost, ExpressVPN, FastestVPN, Giganews, HideMyAss, IPVanish, IVPN,
+Mullvad, NordVPN, Perfect Privacy, Privado, Private Internet Access,
+PrivateVPN, Proton VPN, PureVPN, SlickVPN, Surfshark, TorGuard, VPNSecure,
+VPN Unlimited, VyprVPN, Windscribe — over **OpenVPN** (`vpn_user` /
+`vpn_password`) or **WireGuard** (`vpn_wg_private_key` / `vpn_wg_addresses`).
+
+For a server of your own, or a provider that isn't listed, set
+`vpn_provider: custom`:
+
+- **WireGuard** — add the server's `vpn_wg_public_key`, `vpn_wg_endpoint_ip`
+  and `vpn_wg_endpoint_port` (plus `vpn_wg_preshared_key` if it uses one).
+- **OpenVPN** — point `vpn_openvpn_config` at your `.ovpn` file; the installer
+  copies it into the stack and gluetun connects with it.
+
+A custom server is a single fixed endpoint, so hourly exit rotation is turned
+off for it. The dashboard's VPN card names the VPN that is active (set
+`vpn_name` to choose the label for a custom one) along with the protocol and
+the current exit IP. To switch later, edit the profile and re-run the
+installer.
+
 ## Self-healing, in three layers
 
 1. **systemd** — dashboard server/terminal units run with `Restart=always`,

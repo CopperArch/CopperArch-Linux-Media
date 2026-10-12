@@ -25,10 +25,26 @@ media_pool: /mnt/storage
 nextcloud_data: /mnt/nextcloud-data
 media_disks: []      # extra mount paths to verify, e.g. [/mnt/server-disk1]
 
+# VPN — any provider gluetun supports: airvpn, cyberghost, expressvpn,
+# fastestvpn, giganews, hidemyass, ipvanish, ivpn, mullvad, nordvpn,
+# "perfect privacy", privado, "private internet access", privatevpn, protonvpn,
+# purevpn, slickvpn, surfshark, torguard, vpnsecure, "vpn unlimited", vyprvpn,
+# windscribe — or `custom` for your own server / an unlisted provider.
 vpn_provider: surfshark
+vpn_type: openvpn            # openvpn | wireguard
+vpn_name: ""                 # dashboard label; blank = the provider's name
+# OpenVPN: your provider's service credentials
 vpn_user: ""
 vpn_password: ""
-vpn_server_countries: Netherlands
+vpn_openvpn_config: ""       # custom + openvpn only: path to your .ovpn file
+# WireGuard: from the config your provider (or your own server) gives you
+vpn_wg_private_key: ""
+vpn_wg_addresses: ""         # e.g. 10.64.222.21/32
+vpn_wg_preshared_key: ""     # optional
+vpn_wg_public_key: ""        # custom only: the server's public key
+vpn_wg_endpoint_ip: ""       # custom only: the server's IP address
+vpn_wg_endpoint_port: "51820"
+vpn_server_countries: Netherlands   # not used with `custom`
 vpn_rotate_hourly: true
 
 use_media_stack: true

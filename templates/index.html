@@ -1257,7 +1257,9 @@ function renderServices(d){
   let out="";
   if(v && !v.error){
     const bad = v.healthy!=="healthy" || !v.siblings_ok;
-    out += `<div class="row"><span class="dot ${bad?"f":""}"></span><span class="k">VPN exit</span>
+    out += `<div class="row"><span class="dot ${bad?"f":""}"></span><span class="k">VPN</span>
+            <span class="v">${esc(v.provider||"unknown")} <span class="muted">${esc(v.vpn_type||"")}</span></span></div>
+            <div class="row tiny"><span class="k">exit</span>
             <span class="v">${esc(v.ip||"?")} <span class="muted">${esc(v.country||"")}</span></span></div>
             <div class="row tiny"><span class="k">gluetun</span><span class="v">${esc(v.healthy||"?")} · netns ${v.siblings_ok?"bound ✓":"<span class='stale'>BROKEN</span>"}</span></div>
             <div class="row tiny" style="justify-content:flex-end;gap:6px">

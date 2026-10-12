@@ -9,14 +9,29 @@ services:
     environment:
       - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER}
       - VPN_TYPE=${VPN_TYPE}
-      - OPENVPN_USER=${OPENVPN_USER}
-      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
-      - SERVER_COUNTRIES=${SERVER_COUNTRIES}
+      # Only the variables for the chosen provider/type are set in .env; the
+      # rest stay empty, which gluetun treats as "not set".
+      - OPENVPN_USER=${OPENVPN_USER:-}
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD:-}
+      - OPENVPN_CUSTOM_CONFIG=${OPENVPN_CUSTOM_CONFIG:-}  # provider "custom" + openvpn
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY:-}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:-}
+      - WIREGUARD_PRESHARED_KEY=${WIREGUARD_PRESHARED_KEY:-}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY:-}      # provider "custom" + wireguard
+      - WIREGUARD_ENDPOINT_IP=${WIREGUARD_ENDPOINT_IP:-}
+      - WIREGUARD_ENDPOINT_PORT=${WIREGUARD_ENDPOINT_PORT:-}
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES:-}
+      # control server: what the dashboard's Change IP / Fastest buttons and
+      # the hourly rotation talk to (API key in gluetun-auth/config.toml)
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+      - HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH=/gluetun/auth/config.toml
       - TZ=UTC
       - FIREWALL_INPUT_PORTS=7878,8989,9696  # allow Seerr (on media-net) to reach Radarr/Sonarr/Prowlarr in gluetun netns
       - FIREWALL_OUTBOUND_SUBNETS={{LAN_CIDR}}  # let gluetun-netns containers (jellyseerr, sonarr, radarr...) reach LAN services like Jellyfin/Plex without going through the VPN tunnel
     volumes:
       - gluetun_data:/gluetun
+      - ./gluetun-auth:/gluetun/auth:ro
+      - ./gluetun-custom:/gluetun/custom:ro
     ports:
       - 6881:6881/tcp
       - 6881:6881/udp
