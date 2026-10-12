@@ -35,8 +35,8 @@ import time
 from pathlib import Path
 
 ROOT = Path.home()
-STATE_DIR = ROOT / ".hermes/state/docker-updates"
-SKIPPED_DIR = ROOT / ".hermes/state/docker-updates-skipped"
+STATE_DIR = ROOT / ".dbmedia/state/docker-updates"
+SKIPPED_DIR = ROOT / ".dbmedia/state/docker-updates-skipped"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 SKIPPED_DIR.mkdir(parents=True, exist_ok=True)
 

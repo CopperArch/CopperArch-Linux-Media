@@ -5,7 +5,7 @@
 #   ./daily-routine.sh          # run everything (updates included)
 #   ./daily-routine.sh --quick  # health/connectivity checks only, skip updates
 #
-# Steps that delegate to ~/.hermes/scripts/*.sh are OPTIONAL: they run if the
+# Steps that delegate to ~/.dbmedia/scripts/*.sh are OPTIONAL: they run if the
 # helper exists (copy them over from the old CachyOS box) and skip cleanly if not.
 set -uo pipefail
 
@@ -14,7 +14,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export DEBIAN_FRONTEND=noninteractive
 
 ROOT="{{HOME}}"
-LOG="$ROOT/.hermes/maintenance-logs/daily-routine-$(date +%Y%m%d-%H%M%S).log"
+LOG="$ROOT/.dbmedia/maintenance-logs/daily-routine-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$(dirname "$LOG")"
 
 log()    { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
@@ -38,7 +38,7 @@ banner "Daily Routine started (quick=$QUICK) on $(hostname)"
 
 # ─── 1. System health check ──────────────────────────────────────────────────
 banner "System Health Check"
-run_script "$ROOT/.hermes/scripts/daily-check.sh"
+run_script "$ROOT/.dbmedia/scripts/daily-check.sh"
 
 # ─── 1b. Host health: failed units, SMART, docker restart-loops ─────────────
 # Added 2026-07-11 after an audit found smartmontools.service dead (fixed
@@ -346,14 +346,14 @@ check_seerr "jellyseerr" "jellyseerr"
 
 # ─── 5. Plex health ──────────────────────────────────────────────────────────
 banner "Plex Health Check"
-run_script "$ROOT/.hermes/scripts/plex-health-check.sh"
+run_script "$ROOT/.dbmedia/scripts/plex-health-check.sh"
 
 # ─── 6. Immich duplicate scan (DELETES losing assets, to Immich's trash) ─────
 banner "Immich Duplicate Scan"
-IMMICH_HELPER="$ROOT/.hermes/scripts/immich-duplicate-cleanup.sh"
+IMMICH_HELPER="$ROOT/.dbmedia/scripts/immich-duplicate-cleanup.sh"
 if [[ -f "$IMMICH_HELPER" ]]; then
     # --apply trashes lower-quality duplicate assets (recoverable via Immich's
-    # own trash retention window). Reads the API key from ~/.hermes/immich-api-key.
+    # own trash retention window). Reads the API key from ~/.dbmedia/immich-api-key.
     bash "$IMMICH_HELPER" --apply 2>&1 | tee -a "$LOG"
 else
     log "  [SKIP] $(basename "$IMMICH_HELPER") not found"
@@ -361,7 +361,7 @@ fi
 
 # ─── 7. Nextcloud duplicate scan (DELETES exact-hash-duplicate files) ────────
 banner "Nextcloud Duplicate Scan"
-NC_HELPER="$ROOT/.hermes/scripts/nextcloud-duplicate-cleanup.sh"
+NC_HELPER="$ROOT/.dbmedia/scripts/nextcloud-duplicate-cleanup.sh"
 if [[ -f "$NC_HELPER" ]]; then
     # --apply deletes redundant byte-identical copies (SHA-256 match only, so
     # there's no "quality" ambiguity) and rescans affected users via occ.
@@ -372,10 +372,10 @@ fi
 
 # ─── 8. Jellyfin duplicate removal + collection de-dup (DELETES losing files) ─
 banner "Jellyfin Duplicate Removal"
-JF_HELPER="$ROOT/.hermes/maintenance/jellyfin-duplicates.sh"
+JF_HELPER="$ROOT/.dbmedia/maintenance/jellyfin-duplicates.sh"
 if [[ -f "$JF_HELPER" ]]; then
     # --apply deletes lower-quality duplicate files from disk and removes
-    # repeated collections. Reads the API key from ~/.hermes/jellyfin-api-key.
+    # repeated collections. Reads the API key from ~/.dbmedia/jellyfin-api-key.
     bash "$JF_HELPER" --apply 2>&1 | tee -a "$LOG"
 else
     log "  [SKIP] $(basename "$JF_HELPER") not found"
@@ -465,7 +465,7 @@ KEEP=$( {
         docker compose -f "$f" config --images 2>/dev/null \
             | xargs -r docker image inspect -f '{{.Id}}' 2>/dev/null
     done
-    cat "$ROOT"/.hermes/state/docker-updates/*.json 2>/dev/null \
+    cat "$ROOT"/.dbmedia/state/docker-updates/*.json 2>/dev/null \
         | grep -o '"new_image_id": *"[^"]*"' | cut -d'"' -f4
 } | sort -u )
 IMG_RM=0
@@ -541,7 +541,7 @@ fi
 # Rotate our own maintenance logs and script backups: keep the last 5 days.
 # Both accumulate forever otherwise (this run's own .bak-* siblings in
 # ~/.local/bin never had a cleanup step until now).
-DELETED=$(find "$ROOT/.hermes/maintenance-logs" -name '*.log' -mtime +5 -print -delete 2>/dev/null | wc -l)
+DELETED=$(find "$ROOT/.dbmedia/maintenance-logs" -name '*.log' -mtime +5 -print -delete 2>/dev/null | wc -l)
 log "  [OK]   removed $DELETED maintenance log(s) older than 5 days"
 BAK_DELETED=$(find "$ROOT/.local/bin" -maxdepth 1 -name '*.bak-*' -mtime +5 -print -delete 2>/dev/null | wc -l)
 log "  [OK]   removed $BAK_DELETED script backup(s) (.bak-*) older than 5 days"

@@ -31,7 +31,7 @@ from status_keys import load_env, load_netns
 
 OUT_DIR = Path.home() / ".local/share/status-dashboard"
 OUT_FILE = OUT_DIR / "status.json"
-LOG_DIR = Path.home() / ".hermes/maintenance-logs"
+LOG_DIR = Path.home() / ".dbmedia/maintenance-logs"
 
 # Deployment-specific knobs, all in one place.
 EXPECTED_VPN_COUNTRY = "Netherlands"
@@ -435,7 +435,7 @@ def collect_docker():
     # daily-routine.sh §11) — a pending-update marker means a newer image has
     # already been pulled but not applied, waiting on the dashboard's
     # Update/Skip buttons. Added 2026-09-26.
-    updates_dir = Path.home() / ".hermes/state/docker-updates"
+    updates_dir = Path.home() / ".dbmedia/state/docker-updates"
     if updates_dir.is_dir():
         for f in updates_dir.glob("*.json"):
             name = f.stem

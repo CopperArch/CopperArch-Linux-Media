@@ -352,7 +352,7 @@ def fix_topgrade(args):
     return rc == 0, out[-4000:] or "topgrade complete"
 
 
-UPDATES_STATE_DIR = Path.home() / ".hermes/state/docker-updates"
+UPDATES_STATE_DIR = Path.home() / ".dbmedia/state/docker-updates"
 
 
 def fix_docker_update_apply(args):

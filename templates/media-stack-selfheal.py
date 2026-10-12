@@ -240,7 +240,7 @@ def flush_alerts():
         subject = f"[homelab] containers were DELETED and rebuilt on {host}"
     body = ("media-stack-selfheal.py acted on the following:\n\n"
             + "\n".join(f"  - {a}" for a in ALERTS)
-            + "\n\nFull log: ~/.hermes/maintenance-logs/daily-routine-*.log\n")
+            + "\n\nFull log: ~/.dbmedia/maintenance-logs/daily-routine-*.log\n")
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import importlib.util
@@ -599,9 +599,16 @@ def jf_request(method, path, headers=None, body=None):
 
 def jf_items(itemtype, fields=""):
     f = f"&Fields={fields}" if fields else ""
-    return json.load(jf_request(
+    items = json.load(jf_request(
         "GET", f"/Items?Recursive=true&IncludeItemTypes={itemtype}"
-               f"&Limit=30000{f}")).get("Items", [])
+               f"&CollapseBoxSetItems=false&Limit=30000{f}")).get("Items", [])
+    # Without CollapseBoxSetItems=false Jellyfin 12 folds every movie that
+    # belongs to a collection into its BoxSet, so a large share of the
+    # library never came back here and was never checked.
+    # Newer Jellyfin versions also return BoxSet collections from an
+    # IncludeItemTypes=Movie query — filter to an exact Type match so every
+    # caller keeps getting only what it actually asked for.
+    return [i for i in items if i.get("Type") == itemtype]
 
 
 def fix_missing_artwork():
@@ -754,6 +761,8 @@ def clean_orphaned_downloads(opener):
         log(f"  [FAIL] can't list torrents for cleanup: {e}")
         return
     active_names = {t.get("name", "") for t in ts}
+    complete_hashes = {t.get("hash", "") for t in ts if t.get("progress") == 1}
+    PARTFILE_RE = re.compile(r"^\.([0-9a-f]{40})\.parts$")
 
     try:
         entries = os.listdir(DOWNLOADS_DIR)
@@ -761,9 +770,36 @@ def clean_orphaned_downloads(opener):
         log(f"  [FAIL] can't list {DOWNLOADS_DIR}: {e}")
         return
 
-    removed, kept_unimported = 0, 0
+    removed, removed_partfiles, kept_unimported = 0, 0, 0
     for entry in entries:
         if entry == "incomplete" or entry in active_names:
+            continue
+
+        # qBittorrent's own per-piece completion bitfield for a torrent,
+        # named by infohash rather than display name (so the check above
+        # never matches it). Once that torrent is fully complete/seeding,
+        # the bitfield is provably redundant with the finished file on disk
+        # — unlike everything else this function considers, it's qBittorrent
+        # housekeeping, not user media, so it's safe to remove outright.
+        # Left alone it lingers long past its torrent's completion and
+        # inflates "untracked, needs a manual look" every night.
+        m = PARTFILE_RE.match(entry)
+        if m:
+            full = os.path.join(DOWNLOADS_DIR, entry)
+            try:
+                mtime = os.path.getmtime(full)
+            except FileNotFoundError:
+                continue
+            if (NOW - mtime) / 3600 < DOWNLOADS_GRACE_H:
+                continue
+            if m.group(1) in complete_hashes:
+                try:
+                    os.remove(full)
+                    removed_partfiles += 1
+                except Exception as e:
+                    log(f"  [WARN] failed to remove stale partfile '{entry}': {e}")
+            else:
+                kept_unimported += 1
             continue
         full = os.path.join(DOWNLOADS_DIR, entry)
         try:
@@ -802,7 +838,10 @@ def clean_orphaned_downloads(opener):
     if removed:
         log(f"  [FIX ] removed {removed} orphaned download(s) — each had a "
             f"hardlink twin already in the library, so no data was lost")
-    else:
+    if removed_partfiles:
+        log(f"  [FIX ] removed {removed_partfiles} stale qBittorrent partfile(s) "
+            f"left behind by a now-fully-complete torrent")
+    if not removed and not removed_partfiles:
         log("  [OK]   no orphaned downloads to clean")
     if kept_unimported:
         log(f"  [WARN] left {kept_unimported} untracked item(s) alone — no "
@@ -1655,6 +1694,10 @@ def blocklist_dead(arr, name, dead_hashes):
 STUCK_IMPORT_PHRASES = (
     "no files found are eligible for import",
     "unable to import automatically",
+    # *arr has fully downloaded the release but its own parser can't map it
+    # back to the episode it grabbed for — sits importPending forever, since
+    # it never resolves without a manual episode mapping.
+    "was not found in the grabbed release",
 )
 
 

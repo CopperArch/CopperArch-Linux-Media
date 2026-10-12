@@ -6,7 +6,7 @@ set -uo pipefail
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-LOG="{{HOME}}/.hermes/maintenance-logs/empty-wastebins-$(date +%Y%m%d-%H%M%S).log"
+LOG="{{HOME}}/.dbmedia/maintenance-logs/empty-wastebins-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$(dirname "$LOG")"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 
@@ -30,7 +30,7 @@ else
 fi
 
 # ─── 3. Immich trash ──────────────────────────────────────────────────────────
-IMMICH_KEY_FILE="{{HOME}}/.hermes/immich-api-key"
+IMMICH_KEY_FILE="{{HOME}}/.dbmedia/immich-api-key"
 if [[ -f "$IMMICH_KEY_FILE" ]]; then
     IMMICH_KEY=$(cat "$IMMICH_KEY_FILE")
     CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
