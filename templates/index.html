@@ -254,9 +254,9 @@
   .verdict.clickable:active{transform:scale(.97)}
 
   /* repair overlay */
-  #overlay,#schedule-overlay,#info-overlay{position:fixed;inset:0;background:rgba(5,9,14,.82);backdrop-filter:blur(4px);
+  #overlay,#schedule-overlay,#info-overlay,#vpn-overlay{position:fixed;inset:0;background:rgba(5,9,14,.82);backdrop-filter:blur(4px);
     display:none;align-items:center;justify-content:center;z-index:50}
-  #overlay.on,#schedule-overlay.on,#info-overlay.on{display:flex}
+  #overlay.on,#schedule-overlay.on,#info-overlay.on,#vpn-overlay.on{display:flex}
   .sheet{width:min(980px,94vw);max-height:88vh;display:flex;flex-direction:column;
     background:#0e141d;border:1px solid var(--edge);border-radius:12px;overflow:hidden;
     box-shadow:0 24px 70px rgba(0,0,0,.6)}
@@ -425,6 +425,74 @@
         <span class="spacer" style="flex:1"></span>
         <button class="fixbtn" id="sched-cancel">Cancel</button>
         <button class="fixbtn" id="sched-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="vpn-overlay">
+    <div class="sheet" style="width:min(520px,94vw)">
+      <h3>Change VPN provider</h3>
+      <div class="log" style="padding:12px 15px">
+        <div class="tiny muted" style="margin-bottom:6px;white-space:normal">
+          Pick any provider gluetun supports, or "Custom" for a server of your own.
+          The download apps restart together and are offline for a minute or two.
+          If the new VPN does not connect, the current one is put back automatically.
+        </div>
+        <div class="row tiny vpn-f " style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Provider</span>
+          <select id="vpn-provider" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit"></select>
+        </div>
+        <div class="row tiny vpn-f " style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Connection</span>
+          <select id="vpn-type" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit"><option value="openvpn">OpenVPN</option><option value="wireguard">WireGuard</option></select>
+        </div>
+        <div class="row tiny vpn-f " style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Name shown</span>
+          <input id="vpn-name" maxlength="40" placeholder="optional — e.g. Home server" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-std" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Countries</span>
+          <input id="vpn-countries" placeholder="optional — e.g. Netherlands, Sweden" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-ovpn" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Username</span>
+          <input id="vpn-ovpn-user" autocomplete="off" placeholder="OpenVPN service username" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-ovpn" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Password</span>
+          <input id="vpn-ovpn-pass" type="password" autocomplete="new-password" placeholder="OpenVPN service password" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-ovpn vpn-custom" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">.ovpn file</span>
+          <textarea id="vpn-ovpn-file" rows="4" spellcheck="false" placeholder="paste the contents of your .ovpn file" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit"></textarea>
+        </div>
+        <div class="row tiny vpn-f vpn-wg" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Private key</span>
+          <input id="vpn-wg-key" type="password" autocomplete="off" placeholder="WireGuard private key" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-wg" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Address</span>
+          <input id="vpn-wg-addr" placeholder="e.g. 10.64.222.21/32" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-wg" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Pre-shared key</span>
+          <input id="vpn-wg-psk" type="password" autocomplete="off" placeholder="optional" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-wg vpn-custom" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Server public key</span>
+          <input id="vpn-wg-pub" placeholder="your server's public key" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="row tiny vpn-f vpn-wg vpn-custom" style="gap:10px;margin-top:8px">
+          <span class="k" style="flex:0 0 118px">Server IP : port</span>
+          <input id="vpn-wg-ip" placeholder="IP address" style="flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit"><input id="vpn-wg-port" value="51820" style="flex:0 0 76px;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;font:inherit">
+        </div>
+        <div class="tiny" id="vpn-note" style="margin-top:10px;white-space:normal"></div>
+      </div>
+      <div class="foot">
+        <span class="tiny muted" id="vpn-keep-hint"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="fixbtn" id="vpn-cancel">Cancel</button>
+        <button class="fixbtn" id="vpn-save">Switch</button>
       </div>
     </div>
   </div>
@@ -883,6 +951,7 @@ function renderAttention(d){
 // What each whitelisted fix id actually does, shown against the item that's
 // currently running so the log window isn't just a bare spinner for minutes.
 const FIX_INFO = {
+  vpn_change_provider: "Saving the new provider's settings, then recreating gluetun together with every container that shares its network. If the new VPN has not connected after 2½ minutes, the previous settings are restored and the old VPN is reconnected.",
   docker_start:      "Starting the stopped container.",
   docker_restart:    "Restarting the container. If it's gluetun, this is rerouted into a full VPN-group recreate instead — restarting gluetun alone would strip networking from the containers sharing its namespace.",
   vpn_recreate:       "Force-recreating gluetun and the 7 containers sharing its network namespace (qbittorrent, prowlarr, radarr, sonarr, flaresolverr, chrome, jellyseerr) together, so none of them lose networking.",
@@ -1045,6 +1114,68 @@ $("info-close").onclick = () => $("info-overlay").classList.remove("on");
 $("info-overlay").onclick = e => { if(e.target.id==="info-overlay") $("info-overlay").classList.remove("on"); };
 
 // ── self-heal schedule change ──────────────────────────────────────────────
+
+// ── Change VPN provider ─────────────────────────────────────────────────────
+let vpnInfo = null;
+function vpnDialogSync(){
+  const custom = $("vpn-provider").value === "custom", wg = $("vpn-type").value === "wireguard";
+  document.querySelectorAll("#vpn-overlay .vpn-f").forEach(el => {
+    const c = el.classList;
+    let show = true;
+    if(c.contains("vpn-ovpn") && wg) show = false;
+    if(c.contains("vpn-wg") && !wg) show = false;
+    if(c.contains("vpn-custom") && !custom) show = false;
+    if(c.contains("vpn-std") && custom) show = false;
+    el.style.display = show ? "" : "none";
+  });
+  // Same provider and connection as now: blank credentials mean "keep them".
+  const same = vpnInfo && $("vpn-provider").value === vpnInfo.provider && $("vpn-type").value === vpnInfo.type;
+  const stored = same && (wg ? vpnInfo.has_wireguard_key : vpnInfo.has_openvpn_login);
+  $("vpn-keep-hint").textContent = stored ? "Leave the credentials blank to keep the saved ones." : "";
+}
+async function openVpnDialog(){
+  const note = $("vpn-note"); note.textContent = ""; note.style.color = "";
+  try{
+    vpnInfo = await (await fetch("api/vpn-provider", {cache:"no-store"})).json();
+  }catch(e){ vpnInfo = null; }
+  if(!vpnInfo || !vpnInfo.providers){
+    $("vpn-overlay").classList.add("on");
+    note.textContent = "Could not read the current VPN settings from the dashboard server."; note.style.color = "var(--fail)";
+    return;
+  }
+  $("vpn-provider").innerHTML = vpnInfo.providers
+    .slice().sort((a,b) => (a.id==="custom") - (b.id==="custom") || a.label.localeCompare(b.label))
+    .map(p => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join("");
+  $("vpn-provider").value = vpnInfo.provider || "surfshark";
+  $("vpn-type").value = vpnInfo.type === "wireguard" ? "wireguard" : "openvpn";
+  $("vpn-name").value = vpnInfo.name || "";
+  $("vpn-countries").value = vpnInfo.countries || "";
+  for(const id of ["vpn-ovpn-user","vpn-ovpn-pass","vpn-ovpn-file","vpn-wg-key","vpn-wg-addr","vpn-wg-psk","vpn-wg-pub","vpn-wg-ip"]) $(id).value = "";
+  $("vpn-wg-port").value = "51820";
+  vpnDialogSync();
+  $("vpn-overlay").classList.add("on");
+}
+$("vpn-provider").onchange = vpnDialogSync;
+$("vpn-type").onchange = vpnDialogSync;
+$("vpn-cancel").onclick = () => $("vpn-overlay").classList.remove("on");
+$("vpn-overlay").onclick = e => { if(e.target.id==="vpn-overlay") $("vpn-overlay").classList.remove("on"); };
+$("vpn-save").onclick = () => {
+  const val = id => $(id).value.trim();
+  const args = {
+    provider: $("vpn-provider").value, type: $("vpn-type").value,
+    name: val("vpn-name"), countries: val("vpn-countries"),
+    openvpn_user: val("vpn-ovpn-user"), openvpn_password: $("vpn-ovpn-pass").value,
+    ovpn: $("vpn-ovpn-file").value,
+    wg_private_key: val("vpn-wg-key"), wg_addresses: val("vpn-wg-addr"),
+    wg_preshared_key: val("vpn-wg-psk"), wg_public_key: val("vpn-wg-pub"),
+    wg_endpoint_ip: val("vpn-wg-ip"), wg_endpoint_port: val("vpn-wg-port"),
+  };
+  const label = ($("vpn-provider").selectedOptions[0] || {}).textContent || args.provider;
+  $("vpn-overlay").classList.remove("on");
+  runFixes([{id:"vpn_change_provider", args, label:"Switch VPN to " + label}],
+           "Switching VPN provider…", document.getElementById("vpn-change-btn"));
+};
+
 $("sched-cancel").onclick = () => $("schedule-overlay").classList.remove("on");
 $("schedule-overlay").onclick = e => { if(e.target.id==="schedule-overlay") $("schedule-overlay").classList.remove("on"); };
 $("sched-save").onclick = async () => {
@@ -1265,6 +1396,7 @@ function renderServices(d){
             <div class="row tiny" style="justify-content:flex-end;gap:6px">
               <button class="fixbtn" id="vpn-rotate-btn" title="${esc(FIX_INFO.vpn_rotate)}">Change IP</button>
               <button class="fixbtn" id="vpn-fastest-btn" title="${esc(FIX_INFO.vpn_fastest)}">⚡ Fastest</button>
+              <button class="fixbtn" id="vpn-change-btn" title="${esc(FIX_INFO.vpn_change_provider)}">Change provider</button>
             </div>`;
     const unbound=(v.siblings||[]).filter(x=>!x.bound);
     for(const u of unbound) out += `<div class="row tiny"><span class="k stale">${esc(u.name)} not in gluetun netns</span></div>`;
@@ -1279,6 +1411,8 @@ function renderServices(d){
   const rb = document.getElementById("vpn-rotate-btn");
   if(rb) rb.onclick = () => runFixes(
     [{id:"vpn_rotate", label:"Change VPN IP"}], "Requesting a new VPN exit IP…", rb);
+  const cb = document.getElementById("vpn-change-btn");
+  if(cb) cb.onclick = openVpnDialog;
   const fb = document.getElementById("vpn-fastest-btn");
   if(fb) fb.onclick = () => runFixes(
     [{id:"vpn_fastest", label:"Connect to fastest VPN exit"}], "Finding the fastest VPN exit…", fb);

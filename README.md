@@ -107,8 +107,15 @@ For a server of your own, or a provider that isn't listed, set
 A custom server is a single fixed endpoint, so hourly exit rotation is turned
 off for it. The dashboard's VPN card names the VPN that is active (set
 `vpn_name` to choose the label for a custom one) along with the protocol and
-the current exit IP. To switch later, edit the profile and re-run the
-installer.
+the current exit IP.
+
+To switch later, use **Change provider** on the dashboard's VPN card: pick the
+provider and connection type, enter its credentials (or paste your own
+server's details), and press Switch. The download apps restart together and
+are offline for a minute or two. If the new VPN has not connected after 2½
+minutes the previous settings are put back and the old VPN reconnects, so a
+typo cannot leave you without one. The settings it replaces are kept next to
+the stack as `.env.bak-<date>`.
 
 ## Self-healing, in three layers
 
