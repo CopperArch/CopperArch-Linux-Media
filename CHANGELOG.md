@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.7 - 2026-10-13
+- Nightly routine: one script for Ubuntu/Debian, Fedora, Arch and openSUSE (#17)
+
 ## 0.10.6 - 2026-10-13
 - README: say what it does, list the features, add screenshots (#16)
 
