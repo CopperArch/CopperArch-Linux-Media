@@ -15,6 +15,7 @@ deletes media. Those stay manual.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -129,6 +130,53 @@ def valid_container(name):
 def recollect():
     """Refresh status.json so the page reflects the repair immediately."""
     return sh(["python3", str(BIN / "status-collect.py")], timeout=180)
+
+
+# ── live host numbers ────────────────────────────────────────────────────────
+# status.json is rewritten every 10 s, which is right for containers and apps
+# but too slow for a CPU or memory gauge. The page polls this every 2 s for
+# the cheap host readings, taken with the collector's own functions so the two
+# can never disagree about what a number means.
+_live_lock = threading.Lock()
+_live = {"mod": None, "cpu": None, "at": 0.0, "data": None}
+
+
+def live_status():
+    with _live_lock:
+        now = time.time()
+        if _live["data"] and now - _live["at"] < 1:
+            return _live["data"]      # several open pages share one reading
+        c = _live["mod"]
+        if c is None:
+            spec = importlib.util.spec_from_file_location(
+                "status_collect", BIN / "status-collect.py")
+            c = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(c)
+            _live["mod"] = c
+        prev, cur = _live["cpu"], c.cpu_read()
+        if prev is None or now - _live["at"] > 30:
+            # first call, or nobody has looked for a while: a busy% measured
+            # over the whole gap would be an average, not a reading
+            prev = cur
+            time.sleep(0.25)
+            cur = c.cpu_read()
+        load = os.getloadavg()
+        data = {
+            "epoch": now,
+            "host": {
+                "uptime_seconds": int(float(
+                    Path("/proc/uptime").read_text().split()[0])),
+                "load": {"1": load[0], "5": load[1], "15": load[2],
+                         "ncpu": os.cpu_count() or 1},
+                "cpu": c.cpu_usage(prev, cur),
+                "memory": c.collect_memory(),
+                "sensors": c.collect_sensors(),
+                "power": c.collect_power(),
+            },
+            "disks": c.collect_disks(),
+        }
+        _live.update(cpu=cur, at=now, data=data)
+        return data
 
 
 # ── fix handlers ─────────────────────────────────────────────────────────────
@@ -928,6 +976,11 @@ class Handler(SimpleHTTPRequestHandler):
         if route == "/api/job":
             with _job_lock:
                 return self._json(200, dict(_job))
+        if route == "/api/live":
+            try:
+                return self._json(200, live_status())
+            except Exception as e:      # the page keeps its last numbers
+                return self._json(503, {"error": str(e)})
         if route == "/api/vpn-provider":
             return self._json(200, vpn_provider_info())
         if route == "/api/panes":

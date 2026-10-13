@@ -14,7 +14,7 @@ Repo: `github.com/CopperArch/CopperArch-Linux-Media` (renamed from
 |---|---|
 | **Media stack** | Plex, Jellyfin, Immich (+DB/ML), Nextcloud stack, Seerr, Portainer, Tugtainer, WatchState, Caddy reverse proxy |
 | **VPN stack** | Gluetun (VPN hub), qBittorrent, Sonarr, Radarr, Prowlarr, Seerr-v2, FlareSolverr/Byparr, KasmVNC Chrome (magnet handler wired to qBittorrent) |
-| **Dashboard** | Local status page (loopback-only HTTP server), 60s live collector, one-click repair API (origin-guarded, whitelisted fixes only), terminal panes via ttyd (`--check-origin`), desktop window with below-layer KWin rule |
+| **Dashboard** | Local status page (loopback-only HTTP server), live host gauges (2 s) and a 10 s collector, one-click repair API (origin-guarded, whitelisted fixes only), terminal panes via ttyd (`--check-origin`), desktop window with below-layer KWin rule |
 | **Self-healing** | Nightly `daily-routine.sh` at 03:00: SMART health, container crash-loop detection, VPN IP rotation, qBittorrent queue self-heal, media-stack auto-update with verify+rollback, dashboard re-install on drift, docker log-rotation guard, backups, system updates |
 | **Cron jobs** | Daily routine, DuckDNS updater, wastebin emptier, hourly VPN exit rotation |
 | **Local AI** *(opt-in, off by default)* | Ollama + Z.ai's official open-weights GLM, sized to the machine's RAM (`glm-4.7-flash`, 19 GB, on ≥24 GB RAM; otherwise `glm4:9b`, 5.5 GB). Free and offline; adds GLM chat/ask panes to the dashboard only on machines where it was chosen, models stored on the media pool, updated nightly |
@@ -120,7 +120,7 @@ the stack as `.env.bak-<date>`.
 ## Self-healing, in three layers
 
 1. **systemd** — dashboard server/terminal units run with `Restart=always`,
-   the collector runs every 60s from a timer.
+   the collector runs every 10 s from a timer, and the page reads CPU, memory, swap, temperatures and disks from the server every 2 s.
 2. **Dashboard repairs** — the web dashboard exposes a closed whitelist of
    fixes (container start/restart, VPN recreate/rotate/find-fastest-exit,
    Prowlarr test-all,

@@ -139,26 +139,24 @@ def human(n, unit=1024):
 
 
 # ── host ─────────────────────────────────────────────────────────────────────
-def cpu_sample():
-    """Per-core + aggregate CPU busy% over a short sampling window."""
-    def read():
-        stats = {}
-        for line in Path("/proc/stat").read_text().splitlines():
-            if line.startswith("cpu"):
-                parts = line.split()
-                if len(parts) < 5:
-                    continue
-                vals = [int(x) for x in parts[1:]]
-                idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
-                stats[parts[0]] = (sum(vals), idle)
-            else:
-                break
-        return stats
+def cpu_read():
+    """Raw (total, idle) jiffies per CPU from /proc/stat."""
+    stats = {}
+    for line in Path("/proc/stat").read_text().splitlines():
+        if line.startswith("cpu"):
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            vals = [int(x) for x in parts[1:]]
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+            stats[parts[0]] = (sum(vals), idle)
+        else:
+            break
+    return stats
 
-    a = read()
-    time.sleep(0.4)
-    b = read()
 
+def cpu_usage(a, b):
+    """Per-core + aggregate CPU busy% between two cpu_read() samples."""
     out = {}
     for k in b:
         if k not in a:
@@ -169,6 +167,13 @@ def cpu_sample():
     cores = sorted((k for k in out if k != "cpu"),
                    key=lambda x: int(x[3:] or 0))
     return {"total": out.get("cpu", 0.0), "cores": [out[c] for c in cores]}
+
+
+def cpu_sample():
+    """Per-core + aggregate CPU busy% over a short sampling window."""
+    a = cpu_read()
+    time.sleep(0.4)
+    return cpu_usage(a, cpu_read())
 
 
 def collect_sensors():
@@ -225,12 +230,24 @@ def collect_power():
     return {"now": d.get("now", {}), "avg_1m": d.get("avg_1m", {})}
 
 
-def collect_host():
+def collect_memory():
     mem = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
         k, _, v = line.partition(":")
         mem[k] = int(v.strip().split()[0]) * 1024
+    total = mem.get("MemTotal", 0)
+    avail = mem.get("MemAvailable", 0)
+    used = total - avail
+    return {
+        "total": total, "used": used, "available": avail,
+        "cached": mem.get("Cached", 0), "buffers": mem.get("Buffers", 0),
+        "percent": round(100.0 * used / total, 1) if total else 0,
+        "swap_total": mem.get("SwapTotal", 0),
+        "swap_used": mem.get("SwapTotal", 0) - mem.get("SwapFree", 0),
+    }
 
+
+def collect_host():
     uptime = float(Path("/proc/uptime").read_text().split()[0])
     load = os.getloadavg()
     ncpu = os.cpu_count() or 1
@@ -257,10 +274,6 @@ def collect_host():
     security = [l for l in upg.splitlines()
                 if l.startswith("Inst ") and re.search(r"-security", l)]
 
-    total, used = mem.get("MemTotal", 0), 0
-    avail = mem.get("MemAvailable", 0)
-    used = total - avail
-
     return {
         "hostname": socket.gethostname(),
         "kernel": run(["uname", "-r"]).strip(),
@@ -270,13 +283,7 @@ def collect_host():
         "booted_at": datetime.fromtimestamp(time.time() - uptime).isoformat(timespec="seconds"),
         "load": {"1": load[0], "5": load[1], "15": load[2], "ncpu": ncpu},
         "cpu": {"model": model, "cores": ncpu, **cpu_sample()},
-        "memory": {
-            "total": total, "used": used, "available": avail,
-            "cached": mem.get("Cached", 0), "buffers": mem.get("Buffers", 0),
-            "percent": round(100.0 * used / total, 1) if total else 0,
-            "swap_total": mem.get("SwapTotal", 0),
-            "swap_used": mem.get("SwapTotal", 0) - mem.get("SwapFree", 0),
-        },
+        "memory": collect_memory(),
         "sensors": collect_sensors(),
         "power": collect_power(),
         "reboot_required": reboot_required,
@@ -319,24 +326,34 @@ def collect_disks():
 
 # ── docker ───────────────────────────────────────────────────────────────────
 def recent_restart_loops(containers):
-    """Containers whose RestartCount grew since the previous run, plus any
-    currently bouncing. RestartCount is cumulative since container creation,
-    so only the delta against the last collection (the timer fires every ~60s)
-    says the restarts are *recent* — a bare threshold would warn forever about
-    a container that crash-looped once weeks ago."""
-    prev = {}
+    """Containers whose RestartCount grew by 2+ in the last minute or two,
+    plus any currently bouncing. RestartCount is cumulative since container
+    creation, so only the growth against an earlier reading says the restarts
+    are *recent* — a bare threshold would warn forever about a container that
+    crash-looped once weeks ago.
+
+    The collector runs every 10 s and Docker spaces restarts further apart
+    than that, so the comparison is against a reading 60-120 s old, not the
+    previous run: two readings are kept and rolled once a minute."""
+    now = time.time()
+    counts = {c["name"]: c["restarts"] for c in containers}
+    base = {}
     try:
-        prev = json.loads((OUT_DIR / "restart-baseline.json").read_text())
+        base = json.loads((OUT_DIR / "restart-baseline.json").read_text())
     except Exception:  # noqa: BLE001 — no baseline yet: store one, flag nothing
         pass
+    if not isinstance(base.get("counts"), dict):
+        base = {"at": 0, "counts": {}, "older": {}}   # none, or the old format
+    older = base.get("older") or base["counts"]
     loops = [c["name"] for c in containers
              if c["state"] == "restarting"
-             or c["restarts"] - prev.get(c["name"], c["restarts"]) >= 2]
-    try:
-        (OUT_DIR / "restart-baseline.json").write_text(
-            json.dumps({c["name"]: c["restarts"] for c in containers}))
-    except OSError:
-        pass
+             or c["restarts"] - older.get(c["name"], c["restarts"]) >= 2]
+    if now - base.get("at", 0) >= 60:
+        try:
+            (OUT_DIR / "restart-baseline.json").write_text(json.dumps(
+                {"at": now, "counts": counts, "older": base["counts"] or counts}))
+        except OSError:
+            pass
     return loops
 
 
@@ -452,8 +469,8 @@ def collect_docker():
                 "checked_at": info.get("checked_at"),
             }
 
-    # Live CPU/memory. --no-stream still takes a couple of seconds; that is
-    # fine at the timer's cadence and it is the only source for per-container
+    # Live CPU/memory. --no-stream still takes a couple of seconds; that fits
+    # inside the timer's 10 s cadence and it is the only source for per-container
     # resource use without scraping cgroups by hand.
     stats = run(["docker", "stats", "--no-stream", "--format",
                  "{{.Name}}\x1f{{.CPUPerc}}\x1f{{.MemUsage}}\x1f{{.MemPerc}}"],
@@ -637,7 +654,7 @@ def detect_cloudflare_blocks(hours=6, live_hosts=None):
 
 def collect_media():
     """Query every media source. Each source is one task run in parallel —
-    the sources are independent services, and the timer fires every minute,
+    the sources are independent services, and the timer fires every 10 s,
     so the wall-clock cost is the slowest source instead of the sum."""
     out = {}
 

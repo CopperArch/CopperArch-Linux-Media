@@ -108,6 +108,9 @@ Type=oneshot
 ExecStart=/usr/bin/env python3 %h/.local/bin/status-collect.py
 Nice=10
 IOSchedulingClass=idle
+# runs every 10 s: keep its start/finish lines out of the journal
+LogLevelMax=notice
+StandardOutput=null
 "
 
 write_unit "status-collect.timer" "[Unit]
@@ -115,8 +118,8 @@ Description=Refresh the desktop status dashboard data
 
 [Timer]
 OnBootSec=45s
-OnUnitActiveSec=60s
-AccuracySec=5s
+OnUnitActiveSec=10s
+AccuracySec=1s
 Unit=status-collect.service
 
 [Install]
