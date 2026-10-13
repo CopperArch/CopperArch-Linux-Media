@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.5 - 2026-10-13
+- Dashboard: live host gauges, 10 s collection, open dock starts its pane (#15)
+
 ## 0.10.4 - 2026-10-12
 - Dashboard: Change VPN provider (#14)
 
