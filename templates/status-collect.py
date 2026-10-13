@@ -247,6 +247,45 @@ def collect_memory():
     }
 
 
+def distro_updates():
+    """Pending updates and reboot state on a distro without apt (Fedora, Arch,
+    openSUSE), asked of daily-routine-distro.sh -- the same file the nightly
+    routine uses, so the dashboard and the routine cannot disagree. Asked
+    every 10 minutes, not every collection: it starts a package manager."""
+    script = Path(__file__).resolve().parent / "daily-routine-distro.sh"
+    cache = OUT_DIR / "updates-cache.json"
+    try:
+        c = json.loads(cache.read_text())
+        if time.time() - c["at"] < 600:
+            return c
+    except Exception:  # noqa: BLE001 — no cache yet, or unreadable: ask
+        pass
+    if not script.exists():
+        return None
+
+    def ask(what, timeout=60):
+        try:
+            p = subprocess.run(["bash", str(script), what], capture_output=True,
+                               text=True, timeout=timeout)
+            return p.returncode, p.stdout.strip()
+        except Exception:  # noqa: BLE001
+            return 1, ""
+
+    def num(s):
+        return int(s) if s.isdigit() else 0
+
+    c = {"at": time.time(),
+         "pending": num(ask("pending-cached")[1]),
+         "security": num(ask("security")[1]),
+         "reboot": ask("reboot")[0] == 0,
+         "command": ask("upgrade-hint")[1] or "update with your package manager"}
+    try:
+        cache.write_text(json.dumps(c))
+    except OSError:
+        pass
+    return c
+
+
 def collect_host():
     uptime = float(Path("/proc/uptime").read_text().split()[0])
     load = os.getloadavg()
@@ -263,6 +302,9 @@ def collect_host():
     p = Path("/var/run/reboot-required.pkgs")
     if p.exists():
         reboot_pkgs = sorted(set(p.read_text().split()))
+    other = None if shutil.which("apt-get") else distro_updates()
+    if other:
+        reboot_required = other["reboot"]
 
     failed_units = [l.split()[0] for l in
                     run(["systemctl", "--failed", "--no-legend", "--plain"]).splitlines()
@@ -273,6 +315,11 @@ def collect_host():
     pending = [l.split()[1] for l in upg.splitlines() if l.startswith("Inst ")]
     security = [l for l in upg.splitlines()
                 if l.startswith("Inst ") and re.search(r"-security", l)]
+    update_command = "sudo apt-get -y upgrade"
+    n_pending, n_security = len(pending), len(security)
+    if other:
+        n_pending, n_security = other["pending"], other["security"]
+        update_command = other["command"]
 
     return {
         "hostname": socket.gethostname(),
@@ -289,8 +336,9 @@ def collect_host():
         "reboot_required": reboot_required,
         "reboot_packages": reboot_pkgs,
         "failed_units": failed_units,
-        "updates_pending": len(pending),
-        "updates_security": len(security),
+        "updates_pending": n_pending,
+        "updates_security": n_security,
+        "update_command": update_command,
         "update_packages": pending[:40],
     }
 
@@ -1050,11 +1098,11 @@ def build_attention(host, disks, docker, vpn, services, media, routine):
             {"id": "restart_unit", "args": {"unit": u}, "label": f"Restart {u}"})
     if host.get("updates_security"):
         add(todo, "updates", f"{host['updates_security']} security update(s) pending",
-            "sudo apt-get -y upgrade",
+            host.get("update_command") or "sudo apt-get -y upgrade",
             {"id": "apt_upgrade", "args": {}, "label": "Install pending updates"})
     elif host.get("updates_pending"):
         add(todo, "updates", f"{host['updates_pending']} package update(s) pending",
-            "sudo apt-get -y upgrade",
+            host.get("update_command") or "sudo apt-get -y upgrade",
             {"id": "apt_upgrade", "args": {}, "label": "Install pending updates"})
 
     # ---- temperatures

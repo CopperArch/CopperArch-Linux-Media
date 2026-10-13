@@ -156,9 +156,32 @@ Notes:
 - **Fedora**: Docker CE is installed from Docker's official repository.
 - **Firewall** is best-effort: `ufw` on Debian-family, `firewalld` on Fedora,
   a printed note on Arch.
-- The **daily-routine sudoers rules** are only installed on apt systems
-  (they cover apt-get); on other distros the routine's package-update step
-  is skipped by the routine itself.
+- The **nightly routine is one script for every distro.** The parts that
+  differ are in `daily-routine-distro.sh`:
+
+  | | Ubuntu/Debian | Fedora | Arch | openSUSE |
+  |---|---|---|---|---|
+  | Count pending updates | `apt list --upgradable` | `dnf check-update` | `checkupdates` | `zypper list-updates` |
+  | Security updates | the `-security` pocket | `dnf advisory list --security` | not separate | security patches |
+  | Install updates | `apt-get upgrade` + `autoremove` | `dnf upgrade --refresh` + `autoremove` | `pacman -Syu`, then `paccache -rk2` | `zypper update` (`dup` on Tumbleweed) |
+  | Reboot due | `/var/run/reboot-required` | `dnf needs-restarting -r` | running kernel's modules are gone | `/run/reboot-needed` |
+  | Sudo rules installed | `daily-routine.sudoers` | `.sudoers.dnf` | `.sudoers.pacman` | `.sudoers.zypper` |
+
+  Everything else in the routine is shared, so a change to it reaches every
+  distro at once. The dashboard's update count and its **Fix** button go
+  through the same file. The sudo rules allow exactly those commands and are
+  checked with `visudo -c` before they are installed.
+- **Cron and SMART services** are switched on by the installer (`cronie` and
+  `smartd` are installed but left off by default on Fedora, Arch and
+  openSUSE).
+- **SMART checks** cover every internal SATA/NVMe disk automatically. Disks
+  in USB enclosures are left alone unless you list them in
+  `~/.config/status-dashboard/smart-include` (some USB bridges hang when
+  probed); `smart-skip` in the same folder leaves a disk out. Each takes part
+  of a `/dev/disk/by-id` name per line.
+- `scripts/test-routine-distros.sh` runs the update logic for real in a
+  throwaway container of each distro, as an ordinary user holding only the
+  routine's sudo rules. Run it after changing the routine.
 
 ## Choosing your VPN
 
