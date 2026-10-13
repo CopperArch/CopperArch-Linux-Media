@@ -1,12 +1,86 @@
 # CopperArch Media Server
 
-A graphical installer that reproduces a complete self-healing Linux home
-server — Docker media/VPN stacks, a desktop status dashboard with one-click
-repairs, and a nightly self-healing maintenance routine — on
-**Ubuntu/Debian, Fedora and Arch**.
+**Turn a Linux PC into a home media server that looks after itself.** One
+installer sets up the streaming apps, the download apps behind a VPN, a
+dashboard that shows the whole machine at a glance, and a nightly routine
+that finds and fixes problems while you sleep.
+
+It runs on **Ubuntu/Debian, Fedora, Arch and openSUSE** and their relatives.
+
+![The dashboard](docs/screenshots/dashboard.png)
+
+## What it does
+
+1. **Asks a few questions**, in a graphical wizard or in the terminal: where
+   your media lives, which VPN you use, which apps you want.
+2. **Installs and wires everything together** with Docker: Plex, Jellyfin,
+   Sonarr, Radarr, Prowlarr, qBittorrent, Seerr, Nextcloud, Immich and more.
+3. **Puts the download apps behind the VPN.** They can only reach the internet
+   through it; if the VPN drops, they are cut off rather than exposed.
+4. **Gives you a dashboard** with one-click fixes for the things that go wrong.
+5. **Keeps itself healthy** with a routine that runs every night.
+
+## Features
+
+**Media and downloads**
+- Plex and Jellyfin for streaming; Sonarr, Radarr and Prowlarr to find and
+  organise films and series; qBittorrent to download; Seerr for requests.
+- Nextcloud for files and Immich for photos, each with its database.
+- Caddy reverse proxy and an optional DuckDNS updater.
+- Several drives pooled into one library with mergerfs.
+
+**VPN**
+- Any provider [gluetun](https://github.com/qdm12/gluetun) supports (Mullvad,
+  NordVPN, Proton VPN, Surfshark, Windscribe and about twenty others), over
+  OpenVPN or WireGuard, or a server of your own.
+- **Change provider** from the dashboard. If the new VPN does not connect, the
+  old one is put back automatically.
+- **Change IP** and **Fastest** buttons, and optional hourly exit rotation.
+
+**Dashboard**
+- CPU, memory, swap, temperatures, power and disks, live every 2 seconds.
+- Every container, service, the VPN and the media library, refreshed every
+  10 seconds.
+- A **Needs attention** list with a **Fix** button next to each problem. Fixes
+  come from a fixed whitelist; the page cannot run anything else.
+- Update, Reboot and Refresh buttons; a schedule dialog for the nightly run.
+- A terminal dock for a shell, logs, or an AI assistant.
+- Only reachable from the machine itself (loopback).
+
+**Self-healing**
+- Nightly: disk health (SMART), crash-looping containers, stalled downloads,
+  dead indexers, duplicate media, app updates with rollback if one breaks,
+  backups, system updates.
+- The installer is safe to run again: on a drifted machine it repairs what
+  changed and leaves the rest alone.
+
+**Reproducible**
+- Your answers are saved as a profile file. Give it to the installer on
+  another machine, even a different distro, and you get the same setup.
+- `--dry-run` shows what would happen without changing anything.
+
+**Optional local AI**
+- Off by default. Installs Ollama with an open-weights model sized to the
+  machine's RAM and adds chat panes to the dashboard. Free and offline.
+
+## Screenshots
+
+| Changing VPN provider | Narrow window |
+|---|---|
+| ![Change VPN provider dialog](docs/screenshots/change-vpn-provider.png) | ![Dashboard in a narrow window](docs/screenshots/dashboard-narrow.png) |
+
+The screenshots use a demonstration machine: host name, addresses and
+downloads are made up.
+
+## Related projects
+
+- [freebsd-media-setup-with-dash](https://github.com/CopperArch/freebsd-media-setup-with-dash):
+  the same server on FreeBSD, with jails instead of Docker.
+- [CopperBSD](https://github.com/CopperArch/CopperBSD): a FreeBSD
+  distribution with the media server built in and a native dashboard.
 
 Repo: `github.com/CopperArch/CopperArch-Linux-Media` (renamed from
-`linux-media-setup-with-dash` — old links redirect automatically).
+`linux-media-setup-with-dash`; old links redirect automatically).
 
 ## What it installs
 
