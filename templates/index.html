@@ -964,7 +964,7 @@ const FIX_INFO = {
   selfheal:           "Running the nightly self-heal pass: re-enforcing Prowlarr indexer seeder/priority settings across all 3 config layers, checking download pipeline throughput, blocklisting dead/stalled downloads, and verifying indexers aren't silently Cloudflare-blocked. This is the heaviest fix — it makes several sequential API calls and can take up to 15 minutes.",
   prowlarr_testall:   "Asking Prowlarr to test every indexer and reporting which ones still fail validation.",
   cloudflare_unblock: "Rotating the VPN exit IP (up to 3 attempts, ~15s apart) to escape a Cloudflare IP/range ban, probing the blocked host after each rotation, then re-testing all indexers.",
-  apt_upgrade:        "Running apt-get update && upgrade over sudo. Duration depends on how many packages are pending.",
+  apt_upgrade:        "Installing pending system updates over sudo with this distro's package manager (apt, dnf, pacman or zypper). Duration depends on how many packages are pending.",
   daily_routine_quick:"Running the quick pass of the nightly daily-routine script.",
   restart_unit:       "Restarting the systemd --user unit.",
   topgrade:           "Updating Claude Code, its plugins, and OpenCode via topgrade.",

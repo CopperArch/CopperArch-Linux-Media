@@ -9,11 +9,18 @@
 # helper exists (copy them over from the old CachyOS box) and skip cleanly if not.
 set -uo pipefail
 
-# cron runs with a minimal environment — make PATH and apt behavior explicit.
+# cron runs with a minimal environment — make PATH explicit, and keep apt
+# (where there is one) from stopping to ask questions.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export DEBIAN_FRONTEND=noninteractive
 
 ROOT="{{HOME}}"
+
+# Everything that differs between distros (counting and installing updates,
+# reboot detection, the SMART daemon's name) lives in this one file, so the
+# routine below is the same on Ubuntu/Debian, Fedora, Arch and openSUSE.
+# shellcheck source=daily-routine-distro.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/daily-routine-distro.sh"
 LOG="$ROOT/.dbmedia/maintenance-logs/daily-routine-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$(dirname "$LOG")"
 
@@ -34,7 +41,7 @@ run_script() {
 QUICK=false
 [[ "${1:-}" == "--quick" ]] && QUICK=true
 
-banner "Daily Routine started (quick=$QUICK) on $(hostname)"
+banner "Daily Routine started (quick=$QUICK) on $(uname -n)"
 
 # ─── 1. System health check ──────────────────────────────────────────────────
 banner "System Health Check"
@@ -54,25 +61,46 @@ else
     echo "$FAILED_UNITS" | tee -a "$LOG"
 fi
 
-if systemctl is-active --quiet smartmontools; then
+SMARTD_UNIT=$(smartd_unit)
+if systemctl is-active --quiet "$SMARTD_UNIT"; then
     log "  [OK]   smartmontools (smartd) daemon is active"
 else
-    warn "  [FAIL] smartmontools (smartd) daemon is NOT active — check 'systemctl status smartmontools'"
+    warn "  [FAIL] smartmontools (smartd) daemon is NOT active — check 'systemctl status $SMARTD_UNIT'"
 fi
 
-# SMART health on the disks that actually answer SAT/NVMe passthrough cleanly.
-# By-id paths so USB re-enumeration (device letters shift on reconnect) can't
-# make this silently check the wrong disk. Deliberately excludes:
-#  - the "Expansion HDD" USB enclosure (fails SAT passthrough entirely)
-#  - the SD/MMC card reader (not a real disk)
-#  - the WD30EZRX "nextcloud-data" disk — smartd/smartctl probing hung its
-#    USB bridge for 3+ min and reset the device on 2026-07-11, taking down
-#    the live Nextcloud mount. Do not add it back here; see /etc/smartd.conf.
-SMART_DEVICES=(
-    "/dev/disk/by-id/ata-HGST_HUH721212ALE604_5PJVMRMB:12TB HGST (server-disk pool)"
-    "/dev/disk/by-id/ata-WDC_WD120EMAZ-11BLFA0_8CK75M2F:12TB WD (server-disk pool)"
-    "/dev/disk/by-id/nvme-CT500P3SSD8_240146957338:nvme0n1 (boot SSD)"
-)
+# SMART health on every internal SATA/NVMe disk. By-id paths, so a disk is
+# named by what it is, not by a device letter that shifts on reconnect.
+# USB enclosures and card readers are left out on purpose: many USB bridges
+# do not pass SMART through, and probing some of them hangs the bridge and
+# drops the disk. Two optional files in ~/.config/status-dashboard, one name
+# (or part of a /dev/disk/by-id name) per line:
+#   smart-include   USB disks whose enclosure is known to answer SMART
+#   smart-skip      disks to leave alone
+SMART_SKIP="$ROOT/.config/status-dashboard/smart-skip"
+SMART_INCLUDE="$ROOT/.config/status-dashboard/smart-include"
+SMART_DEVICES=()
+declare -A SMART_SEEN=()
+for dev in /dev/disk/by-id/ata-* /dev/disk/by-id/nvme-*; do
+    [[ -e "$dev" ]] || continue
+    case "$dev" in *-part[0-9]*|*/nvme-eui.*|*/nvme-nvme.*) continue ;; esac
+    real=$(readlink -f "$dev")
+    [[ -b "$real" && -z "${SMART_SEEN[$real]:-}" ]] || continue   # one name per disk
+    SMART_SEEN[$real]=1
+    name=$(basename "$dev")
+    # A disk in a USB enclosure can still show up as ata-*: go by how it is
+    # actually attached.
+    if [[ "$(readlink -f "/sys/block/$(basename "$real")" 2>/dev/null)" == */usb* ]] \
+       && ! { [[ -f "$SMART_INCLUDE" ]] && grep -qFf <(grep -v '^[[:space:]]*\(#\|$\)' "$SMART_INCLUDE") <<<"$name"; }; then
+        log "  [SKIP] SMART $(basename "$real"): attached over USB (add it to smart-include to check it)"
+        continue
+    fi
+    if [[ -f "$SMART_SKIP" ]] && grep -qFf <(grep -v '^[[:space:]]*\(#\|$\)' "$SMART_SKIP") <<<"$name"; then
+        log "  [SKIP] SMART $(basename "$real"): listed in smart-skip"
+        continue
+    fi
+    SMART_DEVICES+=("$dev:$(basename "$real") ($name)")
+done
+[[ ${#SMART_DEVICES[@]} -eq 0 ]] && log "  [SKIP] SMART: no internal SATA/NVMe disk found"
 for entry in "${SMART_DEVICES[@]}"; do
     dev="${entry%%:*}"
     label="${entry#*:}"
@@ -109,16 +137,19 @@ $RESTART_ALERT || log "  [OK]   No containers in a restart loop"
 
 # ─── 1c. Pending updates & reboot status (report-only; applied in step 10) ──
 banner "Pending Updates & Reboot Status"
-UPGRADABLE_COUNT=$(apt list --upgradable 2>/dev/null | grep -c upgradable)
-SECURITY_COUNT=$(apt list --upgradable 2>/dev/null | grep -ic -- '-security' || true)
-log "  Pending apt upgrades: $UPGRADABLE_COUNT"
-if [[ "${SECURITY_COUNT:-0}" -gt 0 ]]; then
-    warn "  [WARN] $SECURITY_COUNT of those are from the -security pocket"
+PKG_MGR=$(pkg_manager_name)
+UPGRADABLE_COUNT=$(pkg_pending_count)
+SECURITY_COUNT=$(pkg_security_count)
+log "  Pending $PKG_MGR upgrades: $UPGRADABLE_COUNT"
+if [[ -z "$SECURITY_COUNT" ]]; then
+    log "  [OK]   This distro has no separate security channel — every update is counted above"
+elif [[ "$SECURITY_COUNT" -gt 0 ]]; then
+    warn "  [WARN] $SECURITY_COUNT of those are security updates"
 else
-    log "  [OK]   No pending -security pocket upgrades"
+    log "  [OK]   No pending security updates"
 fi
-if [[ -f /var/run/reboot-required ]]; then
-    warn "  [WARN] Reboot required$( [[ -f /var/run/reboot-required.pkgs ]] && echo " (packages: $(tr '\n' ' ' < /var/run/reboot-required.pkgs))" )"
+if REBOOT_WHY=$(reboot_needed); then
+    warn "  [WARN] Reboot required ($REBOOT_WHY)"
 else
     log "  [OK]   No reboot required"
 fi
@@ -564,16 +595,15 @@ else
     log "  [SKIP] nextcloud-system-backup.sh not found"
 fi
 
-# ─── 10. System updates (apt + snap + flatpak + firmware) ────────────────────
+# ─── 10. System updates (distro packages + snap + flatpak + firmware) ────────
 if ! $QUICK; then
-    banner "APT System Update"
-    sudo apt-get update 2>&1 | tee -a "$LOG"
-    if sudo apt-get -y upgrade 2>&1 | tee -a "$LOG"; then
-        log "  [OK]   apt upgrade completed"
+    banner "System Update ($PKG_MGR)"
+    pkg_upgrade 2>&1 | tee -a "$LOG"
+    if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+        log "  [OK]   $PKG_MGR upgrade completed"
     else
-        warn "  apt upgrade finished with errors — continuing"
+        warn "  $PKG_MGR upgrade finished with errors — continuing"
     fi
-    sudo apt-get -y autoremove 2>&1 | tee -a "$LOG"
 
     banner "Snap Updates"
     if command -v snap &>/dev/null; then

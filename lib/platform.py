@@ -43,6 +43,8 @@ class Platform:
         "xrandr":        ("x11-xserver-utils",      "xrandr",              "xorg-xrandr",    "xrandr"),
         "tmux":          ("tmux",                   "tmux",                "tmux",           "tmux"),
         "zstd":          ("zstd",                   "zstd",                "zstd",           "zstd"),
+        # checkupdates + paccache, used by the nightly routine on Arch
+        "pkg-tools":     (None,                     None,                  "pacman-contrib", None),
     }
 
     def pkg_name(self, logical: str) -> str | None:
@@ -141,6 +143,18 @@ class Platform:
 
     def service(self, sudo, unit: str, action: str) -> bool:
         return sudo.run(["systemctl", action, unit], timeout=120).returncode == 0
+
+    # Units that carry a different name per family. Debian-family packages
+    # start their services on install; Fedora, Arch and openSUSE leave them
+    # off, so on those the nightly routine would never run (no cron daemon)
+    # and would report the SMART daemon as down every night.
+    CRON_UNIT = {"apt": "cron", "dnf": "crond", "pacman": "cronie", "zypper": "cron"}
+    SMARTD_UNIT = {"apt": "smartmontools", "dnf": "smartd", "pacman": "smartd",
+                   "zypper": "smartd"}
+
+    def enable_now(self, sudo, unit: str) -> bool:
+        return sudo.run(["systemctl", "enable", "--now", unit],
+                        timeout=120).returncode == 0
 
     def crontab_user(self, entries: list[str]) -> bool:
         """Merge extra crontab entries into the current user's crontab."""

@@ -328,6 +328,14 @@ def fix_cloudflare_unblock(args):
 
 
 def fix_apt_upgrade(args):
+    """Install pending updates. The id says apt for history's sake; on Fedora,
+    Arch and openSUSE it runs that distro's upgrade through
+    daily-routine-distro.sh, the same function the nightly routine uses."""
+    if not shutil.which("apt-get"):
+        rc, out = sh(["bash", str(BIN / "daily-routine-distro.sh"), "upgrade"],
+                     timeout=3600)
+        (ROOT / "updates-cache.json").unlink(missing_ok=True)   # recount now
+        return rc == 0, out[-3800:].strip() or "upgrade complete"
     # Both commands are in the NOPASSWD sudoers entry verbatim.
     rc, out = sh(["sudo", "-n", "/usr/bin/apt-get", "update"], timeout=300)
     rc2, out2 = sh(["sudo", "-n", "/usr/bin/apt-get", "-y", "upgrade"], timeout=1800)

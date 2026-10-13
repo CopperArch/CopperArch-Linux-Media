@@ -40,7 +40,7 @@ def base_packages(ctx: Ctx) -> list[str]:
         # — see dashboard-pane.sh.
         need += ["tkinter", "xrandr", "tmux"]
     if ctx.profile.use_daily_routine:
-        need += ["smartmontools", "ncdu"]
+        need += ["smartmontools", "ncdu", "pkg-tools"]
     if ctx.profile.use_local_glm:
         need += ["zstd"]     # ollama's install.sh unpacks a .tar.zst
     if ctx.profile.media_pool and "mergerfs" not in ctx.profile.media_pool:
@@ -323,11 +323,20 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
             ctx.sudo.run(["install", "-o", "root", "-g", "root", "-m", "0440",
                           etc / "docker-log-clean.sudoers",
                           "/etc/sudoers.d/docker-log-clean"], timeout=30)
-        if ctx.plat.family == "apt" and (etc / "daily-routine.sudoers").exists():
+        # One rules file per package-manager family: the routine's update
+        # step runs apt-get, dnf, pacman or zypper depending on the distro.
+        rules = etc / ("daily-routine.sudoers" if ctx.plat.family == "apt"
+                       else f"daily-routine.sudoers.{ctx.plat.family}")
+        if rules.exists():
             tmp = Path("/tmp/daily-routine.sudoers.rendered")
-            render_file(etc / "daily-routine.sudoers", tmp, ctx.v, 0o644)
-            ctx.sudo.run(["install", "-o", "root", "-g", "root", "-m", "0440",
-                          tmp, "/etc/sudoers.d/daily-routine"], timeout=30)
+            render_file(rules, tmp, ctx.v, 0o644)
+            # A sudoers file with a mistake in it locks sudo for everyone,
+            # so it is checked before it goes anywhere near /etc.
+            if run(["visudo", "-cf", str(tmp)], quiet=True).returncode == 0:
+                ctx.sudo.run(["install", "-o", "root", "-g", "root", "-m", "0440",
+                              tmp, "/etc/sudoers.d/daily-routine"], timeout=30)
+            else:
+                log(f"  ! {rules.name} did not pass visudo -c; not installed")
             tmp.unlink()
         # Power tile: a root service publishes averaged watts from the CPU's
         # RAPL counters (root-only by design) and any GPU energy sensor.
@@ -401,7 +410,15 @@ def install_cron(ctx: Ctx) -> tuple[bool, str]:
             entries.append("17 * * * * " + str(Path.home() / ".local/bin/gluetun-rotate.sh"))
         if entries and not ctx.plat.crontab_user(entries):
             return False, "crontab update failed"
-        return True, f"{len(entries)} cron entries"
+        note = ""
+        if entries and not ctx.plat.enable_now(
+                ctx.sudo, ctx.plat.CRON_UNIT[ctx.plat.family]):
+            note = "; could not start the cron service, so nothing will run on schedule"
+        if ctx.profile.use_daily_routine:
+            # best effort: smartd refuses to start where no disk speaks SMART
+            # (a virtual machine), and that is not a failed install
+            ctx.plat.enable_now(ctx.sudo, ctx.plat.SMARTD_UNIT[ctx.plat.family])
+        return not note, f"{len(entries)} cron entries{note}"
     return _exec_step(ctx, "install cron entries", do)
 
 
