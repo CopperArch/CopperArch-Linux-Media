@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.9 - 2026-10-14
+- Dashboard pane: right-click or middle-click pastes the desktop clipboard (#22)
+
 ## 0.10.8 - 2026-10-14
 - Nightly security & firewall check, with fixes and updates (#21)
 
