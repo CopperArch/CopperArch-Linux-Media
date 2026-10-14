@@ -11,6 +11,10 @@
 }
 
 :80 {
+	# Plain HTTP is for the home network and Tailscale only. If the router
+	# forwards port 80 from the internet, anything from outside is dropped.
+	@outside not remote_ip private_ranges 100.64.0.0/10
+	abort @outside
 	# Jellyfin runs in host-network mode on the box's LAN IP.
 	reverse_proxy {{LAN_IP}}:8096
 
@@ -25,6 +29,10 @@
 # Used by Tailscale Funnel (via the 8097->81 port publish) so Plex gets the
 # same Caddy-fronted (gzip/logging) treatment as Jellyfin.
 :81 {
+	# Plain HTTP is for the home network and Tailscale only. If the router
+	# forwards port 80 from the internet, anything from outside is dropped.
+	@outside not remote_ip private_ranges 100.64.0.0/10
+	abort @outside
 	reverse_proxy {{LAN_IP}}:32400
 
 	encode gzip
@@ -35,6 +43,10 @@
 }
 
 http://{{NEXTCLOUD_DOMAIN}} {
+	# Plain HTTP is for the home network and Tailscale only. If the router
+	# forwards port 80 from the internet, anything from outside is dropped.
+	@outside not remote_ip private_ranges 100.64.0.0/10
+	abort @outside
 	reverse_proxy {{LAN_IP}}:8090 {
 		header_up X-Forwarded-Proto https
 		header_up X-Forwarded-Host {host}
