@@ -34,12 +34,22 @@ OUT_FILE = OUT_DIR / "status.json"
 LOG_DIR = Path.home() / ".dbmedia/maintenance-logs"
 
 # Deployment-specific knobs, all in one place.
+# The VPN exit is expected in one of gluetun's SERVER_COUNTRIES (the hourly
+# rotation moves between them); this is only used when that is not set.
 EXPECTED_VPN_COUNTRY = "Netherlands"
 DAILY_ROUTINE_NEXT_RUN = "03:00 daily"
 INTERESTING_MOUNTS = {"/", "{{MEDIA_POOL}}", "{{NEXTCLOUD_DATA}}",
                       "{{MEDIA_DISK1}}", "{{MEDIA_DISK2}}",
                       "{{MEDIA_DISK3}}", "/boot", "/boot/efi",
                       "/var/lib/docker"}
+
+
+def _country_key(name):
+    """'The Netherlands' and 'netherlands' are the same country; so are
+    'Czechia' and 'Czech Republic'."""
+    n = name.strip().lower()
+    n = n[4:] if n.startswith("the ") else n
+    return {"czechia": "czech republic"}.get(n, n)
 
 # ── service config ───────────────────────────────────────────────────────────
 # Credentials live in ~/.config/status-dashboard/media-keys.env (chmod 600) so
@@ -584,6 +594,8 @@ def collect_vpn():
     info["provider"] = label or VPN_PROVIDER_NAMES.get(prov, prov.title()) or None
     info["vpn_type"] = {"openvpn": "OpenVPN", "wireguard": "WireGuard"}.get(
         genv.get("VPN_TYPE", "openvpn").strip().lower() or "openvpn")
+    info["countries"] = [c.strip() for c in
+                         genv.get("SERVER_COUNTRIES", "").split(",") if c.strip()]
 
     logs = run(["docker", "logs", "--tail", "400", "gluetun"], timeout=15)
     for line in reversed(logs.splitlines()):
@@ -594,6 +606,18 @@ def collect_vpn():
             info["country"] = parts[0] if parts else None
             info["city"] = parts[-1].split(" - ")[0] if len(parts) > 1 else None
             break
+
+    # gluetun-rotate.sh records where each hourly move actually landed; it is
+    # newer than gluetun's own lookup whenever that is being rate-limited.
+    try:
+        ex = json.loads((Path.home() / ".local/state/gluetun-exit.json").read_text())
+        if ex.get("country") and time.time() - float(ex.get("at", 0)) < 2 * 3600 \
+                and ex["country"] != info.get("country"):
+            info["country"], info["city"] = ex["country"], None
+        if ex.get("mbps"):
+            info["mbps"] = ex["mbps"]
+    except (OSError, ValueError, TypeError):
+        pass
 
     gid = run(["docker", "inspect", "-f", "{{.Id}}", "gluetun"], timeout=10).strip()
     for name in NETNS_SIBLINGS:
@@ -1074,8 +1098,11 @@ def build_attention(host, disks, docker, vpn, services, media, routine):
                 "docker compose -f ~/docker/vpn-stack up -d --force-recreate",
                 {"id": "vpn_recreate", "args": {},
                  "label": "Recreate the whole gluetun netns group"})
-        if vpn.get("country") and vpn["country"] != EXPECTED_VPN_COUNTRY:
-            add(warning, "vpn", f"VPN exit is {vpn['country']}, expected {EXPECTED_VPN_COUNTRY}",
+        allowed = vpn.get("countries") or [EXPECTED_VPN_COUNTRY]
+        if vpn.get("country") and _country_key(vpn["country"]) not in {
+                _country_key(c) for c in allowed}:
+            add(warning, "vpn", f"VPN exit is {vpn['country']}, expected one of "
+                f"{', '.join(allowed)}",
                 "~/.local/bin/gluetun-rotate.sh",
                 {"id": "vpn_rotate", "args": {}, "label": "Rotate VPN exit IP"})
 
