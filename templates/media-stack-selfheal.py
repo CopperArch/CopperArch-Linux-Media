@@ -1860,6 +1860,22 @@ def heal_missing_radarr(missing):
             log(f"           [WARN] couldn't clear moviefile {file_id}: {e}")
             continue
         movie_ids.append(movie_id)
+    # Only search films that are actually out. A search started here counts as
+    # user-invoked, so Radarr skips its "minimum availability" rule: on
+    # 2026-10-14 this re-searched The Odyssey a month before its digital
+    # release and grabbed a different 2026 film of the same name. Unreleased
+    # ones stay monitored and are picked up from RSS once they are out.
+    waiting = []
+    for movie_id in list(movie_ids):
+        try:
+            if not arr_get(RADARR, f"/movie/{movie_id}").get("isAvailable"):
+                movie_ids.remove(movie_id)
+                waiting.append(movie_id)
+        except Exception:
+            pass
+    if waiting:
+        log(f"  [OK]   Radarr: {len(waiting)} movie(s) not released yet — left "
+            f"for RSS to pick up, not searched now")
     if movie_ids:
         body = json.dumps({"name": "MoviesSearch", "movieIds": movie_ids}).encode()
         try:
