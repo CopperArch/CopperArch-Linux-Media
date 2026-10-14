@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.10 - 2026-10-14
+- Changelog: stop referring to the deleted v0.1.0-pre tag (#23)
+
 ## 0.10.9 - 2026-10-14
 - Dashboard pane: right-click or middle-click pastes the desktop clipboard (#22)
 
