@@ -72,9 +72,16 @@ if running gluetun; then
     fi
     VPN_IP=$(docker exec gluetun wget -qO- --timeout=10 https://api.ipify.org 2>/dev/null | tr -d '[:space:]')
     if [[ -n "$HOME_IP" && "$VPN_IP" == "$HOME_IP" ]]; then
-        # Downloads would be going out on the home connection: stop them first.
-        docker stop qbittorrent >/dev/null 2>&1
-        fail "VPN LEAK: traffic in the VPN namespace leaves on the home IP — stopped qBittorrent; check gluetun"
+        # Same address as home. A VPN server on this same connection exits
+        # there too, so the address alone proves nothing: it is a leak only
+        # when the kill switch is off or the tunnel interface is gone.
+        if ! grep -qiE '^FIREWALL(_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT)?=(off|no|false)' <<<"$GENV" \
+           && docker exec gluetun sh -c 'ip link show tun0 >/dev/null 2>&1 || ip link show wg0 >/dev/null 2>&1'; then
+            warn "downloads leave on the home IP, but through the tunnel with the kill switch on — is the VPN server on this same connection?"
+        else
+            docker stop qbittorrent >/dev/null 2>&1
+            fail "VPN LEAK: traffic in the VPN namespace leaves on the home IP outside the tunnel — stopped qBittorrent; check gluetun"
+        fi
     elif [[ -z "$VPN_IP" ]]; then
         warn "VPN tunnel gave no public IP (down or reconnecting) — downloads are blocked, not leaking"
     else
