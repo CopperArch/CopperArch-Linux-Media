@@ -232,7 +232,7 @@ def write_vpn_extras(p: Profile, vpn_dir: Path) -> None:
     cfg = auth / "config.toml"
     cfg.write_text('[[roles]]\nname = "rotator"\n'
                    'routes = ["GET /v1/publicip/ip", "GET /v1/vpn/status", '
-                   '"PUT /v1/vpn/status"]\n'
+                   '"PUT /v1/vpn/status", "GET /v1/vpn/settings", "PUT /v1/vpn/settings"]\n'
                    f'auth = "apikey"\napikey = "{rotate_key()}"\n')
     cfg.chmod(0o600)
     custom = vpn_dir / "gluetun-custom"
