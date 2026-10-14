@@ -6,3 +6,8 @@
 {{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/smartctl -H -A /dev/disk/by-id/*
 {{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/journalctl --vacuum-time=*
 {{DASH_USER}} ALL=(root) NOPASSWD: /usr/local/sbin/docker-log-clean.sh
+# security-check.sh: the nightly security pass
+{{DASH_USER}} ALL=(root) NOPASSWD: /usr/local/bin/cloudflared update
+{{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/systemctl restart cloudflared
+{{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/firewall-cmd --state
+{{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/systemctl start firewalld

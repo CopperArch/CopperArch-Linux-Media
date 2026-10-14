@@ -8,6 +8,7 @@ the system runs without an explicit "accept" from the user, per component.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -252,6 +253,28 @@ def write_secret_env(path: Path, env: dict) -> None:
 
 
 # ── 4. local scripts + units + dashboard page ───────────────────────────────
+def _exact_sudo_rules(text: str) -> str:
+    """sudo-rs (Ubuntu's sudo since 25.10) refuses wildcards in command
+    arguments, and visudo then rejects the whole file. Write those rules out
+    exactly: one smartctl line per disk present, and the journal cleanup with
+    the retention the routine actually uses. USB disks are left out (the
+    routine does not check them unless asked to), and the characters sudoers
+    treats as syntax are escaped."""
+    disks = sorted(str(d) for d in Path("/dev/disk/by-id").glob("*")
+                   if d.name.startswith(("ata-", "nvme-", "scsi-"))
+                   and "-part" not in d.name and not d.name.startswith("nvme-eui."))
+    out = []
+    for line in text.splitlines():
+        if "smartctl -H -A /dev/disk/by-id/*" in line:
+            out += [line.replace("/dev/disk/by-id/*",
+                                 re.sub(r"([\\:,=])", r"\\\1", d)) for d in disks]
+        elif "--vacuum-time=*" in line:
+            out.append(line.replace("--vacuum-time=*", "--vacuum-time=14d"))
+        else:
+            out.append(line)
+    return "\n".join(out) + "\n"
+
+
 def install_scripts(ctx: Ctx) -> tuple[bool, str]:
     def do(ctx):
         # State dir was ~/.hermes before 0.10.2 — carry an existing one over
@@ -330,6 +353,7 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
         if rules.exists():
             tmp = Path("/tmp/daily-routine.sudoers.rendered")
             render_file(rules, tmp, ctx.v, 0o644)
+            tmp.write_text(_exact_sudo_rules(tmp.read_text()))
             # A sudoers file with a mistake in it locks sudo for everyone,
             # so it is checked before it goes anywhere near /etc.
             if run(["visudo", "-cf", str(tmp)], quiet=True).returncode == 0:

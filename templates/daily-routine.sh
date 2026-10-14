@@ -306,6 +306,17 @@ else
     warn "  [FAIL] gluetun container not running"
 fi
 
+# ─── 4a. Security & firewall ─────────────────────────────────────────────────
+# Host firewall, VPN kill switch and leaks, what the internet can reach,
+# secret-file permissions, and updates for the security pieces (Caddy,
+# cloudflared, gluetun, Tailscale). Fixes what it safely can.
+banner "Security & Firewall"
+if [[ -x "$ROOT/.local/bin/security-check.sh" ]]; then
+    "$ROOT/.local/bin/security-check.sh" 2>&1 | tee -a "$LOG"
+else
+    log "  [SKIP] security-check.sh not found"
+fi
+
 # ─── 4b. Media pipeline self-heal (qBittorrent queue + dead downloads) ───────
 # Reapplies qBittorrent's queue settings if drifted, verifies Radarr/Sonarr can
 # reach the download client, and blocklists+re-searches genuinely-dead torrents

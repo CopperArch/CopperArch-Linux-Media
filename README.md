@@ -51,6 +51,12 @@ It runs on **Ubuntu/Debian, Fedora, Arch and openSUSE** and their relatives.
 - Nightly: disk health (SMART), crash-looping containers, stalled downloads,
   dead indexers, duplicate media, app updates with rollback if one breaks,
   backups, system updates.
+- Nightly security check: host firewall on, VPN kill switch and IP/DNS/IPv6
+  leaks, what the internet can actually reach (probed from outside through
+  the VPN), new Docker ports or Tailscale Funnel addresses, secret files
+  readable by others, and Caddy/cloudflared kept up to date. It fixes what it
+  safely can (firewall back on, file permissions, qBittorrent stopped on a
+  leak, Caddy rebuilt on a new release) and reports the rest on the dashboard.
 - The installer is safe to run again: on a drifted machine it repairs what
   changed and leaves the rest alone.
 
@@ -89,7 +95,7 @@ Repo: `github.com/CopperArch/CopperArch-Linux-Media` (renamed from
 | **Media stack** | Plex, Jellyfin, Immich (+DB/ML), Nextcloud stack, Seerr, Portainer, Tugtainer, WatchState, Caddy reverse proxy |
 | **VPN stack** | Gluetun (VPN hub), qBittorrent, Sonarr, Radarr, Prowlarr, Seerr-v2, FlareSolverr/Byparr, KasmVNC Chrome (magnet handler wired to qBittorrent) |
 | **Dashboard** | Local status page (loopback-only HTTP server), live host gauges (2 s) and a 10 s collector, one-click repair API (origin-guarded, whitelisted fixes only), terminal panes via ttyd (`--check-origin`), desktop window with below-layer KWin rule |
-| **Self-healing** | Nightly `daily-routine.sh` at 03:00: SMART health, container crash-loop detection, VPN IP rotation, qBittorrent queue self-heal, media-stack auto-update with verify+rollback, dashboard re-install on drift, docker log-rotation guard, backups, system updates |
+| **Self-healing** | Nightly `daily-routine.sh` at 03:00: SMART health, security & firewall check, container crash-loop detection, VPN IP rotation, qBittorrent queue self-heal, media-stack auto-update with verify+rollback, dashboard re-install on drift, docker log-rotation guard, backups, system updates |
 | **Cron jobs** | Daily routine, DuckDNS updater, wastebin emptier, hourly VPN exit rotation |
 | **Local AI** *(opt-in, off by default)* | Ollama + Z.ai's official open-weights GLM, sized to the machine's RAM (`glm-4.7-flash`, 19 GB, on ≥24 GB RAM; otherwise `glm4:9b`, 5.5 GB). Free and offline; adds GLM chat/ask panes to the dashboard only on machines where it was chosen, models stored on the media pool, updated nightly |
 
