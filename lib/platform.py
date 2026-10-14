@@ -39,7 +39,7 @@ class Platform:
         "rsync":         ("rsync",                  "rsync",               "rsync",          "rsync"),
         "unzip":         ("unzip",                  "unzip",               "unzip",          "unzip"),
         "mergerfs":      ("mergerfs",               "mergerfs",            None,             "mergerfs"),
-        "ufw":           ("ufw",                    "ufw",                 None,             None),
+        "ufw":           ("ufw",                    "ufw",                 "ufw",            None),
         "xrandr":        ("x11-xserver-utils",      "xrandr",              "xorg-xrandr",    "xrandr"),
         "tmux":          ("tmux",                   "tmux",                "tmux",           "tmux"),
         "zstd":          ("zstd",                   "zstd",                "zstd",           "zstd"),
@@ -109,7 +109,9 @@ class Platform:
                 self._setup_docker_repo_fedora(sudo)
             p = sudo.run(["dnf", "install", "-y", *names], timeout=3600)
         elif self.family == "pacman":
-            p = sudo.run(["pacman", "-Sy", "--noconfirm", "--needed", *names],
+            # -Syu, never -Sy alone: refreshing without upgrading is the partial
+            # upgrade Arch warns breaks library sonames.
+            p = sudo.run(["pacman", "-Syu", "--noconfirm", "--needed", *names],
                          timeout=3600)
         else:  # zypper
             p = sudo.run(["zypper", "--non-interactive", "install", *names],
@@ -170,20 +172,3 @@ class Platform:
         new = "\n".join(keep + block) + "\n"
         q = run(["crontab", "-"], input_text=new, quiet=True)
         return q.returncode == 0
-
-    def firewall_open(self, sudo, ports: list[tuple[int, str]]) -> None:
-        """Best-effort firewall: ufw (apt) / firewalld (dnf) / none (arch note)."""
-        if self.family == "apt" and have("ufw"):
-            for port, proto in ports:
-                sudo.run(["ufw", "allow", f"{port}/{proto}"], timeout=60)
-            return
-        if self.family == "dnf" and have("firewall-cmd"):
-            sudo.run(["systemctl", "enable", "--now", "firewalld"], timeout=60)
-            for port, proto in ports:
-                sudo.run(["firewall-cmd", "--permanent",
-                          "--add-port", f"{port}/{proto}"], timeout=60)
-            sudo.run(["firewall-cmd", "--reload"], timeout=60)
-            return
-        # arch: ufw is AUR-only; leave the firewall untouched and say so.
-        print("  [SKIP] no ufw/firewalld — open these ports manually: "
-              + ", ".join(f"{p}/{pr}" for p, pr in ports))

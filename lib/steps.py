@@ -54,9 +54,15 @@ def install_packages(ctx: Ctx, accept) -> tuple[bool, str]:
     names = [ctx.plat.pkg_name(l) for l in pkgs]
     if not accept("Install system packages?\n  " + ", ".join(names)):
         return False, "packages declined"
+    if (ctx.profile.media_pool and "mergerfs" not in ctx.profile.media_pool
+            and not ctx.plat.pkg_name("mergerfs") and not have("mergerfs")):
+        log("  [SKIP] mergerfs is not in Arch's official repos — install it "
+            "from the AUR (e.g. `yay -S mergerfs`) to pool your disks")
     def do(ctx):
-        if have("docker") and have("git") and have("curl"):
-            return True, "already present (checked docker/git/curl)"
+        # Always run it: every package manager here skips what is already
+        # installed. Skipping the whole step when docker/git/curl existed left
+        # machines that already had Docker without tmux, smartmontools and
+        # Arch's pacman-contrib (the nightly routine's checkupdates).
         return ctx.plat.install(ctx.sudo, pkgs)
     return _exec_step(ctx, f"install packages: {names}", do)
 
