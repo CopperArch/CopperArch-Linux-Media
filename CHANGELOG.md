@@ -2,7 +2,7 @@
 
 The project version lives in `VERSION` and is shown in the dashboard's About
 panel (click the logo). Versions before 0.10.0 were not numbered; 0.10.0 is
-the tenth merged change since the `v0.1.0-pre` tag.
+the tenth merged change since the first preview, 0.1.0-pre (September 2026).
 
 The number updates by itself: every change merged to `main` gets the next
 patch number from `.github/workflows/bump-version.yml`, which also adds the
