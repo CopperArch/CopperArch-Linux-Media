@@ -264,7 +264,8 @@ fi
 
 # qBittorrent WebUI credentials — read from env so they're not hardcoded here.
 : "${QB_USER:=admin}"
-: "${QB_PASS:={{QBIT_PASSWORD}}}"
+# The password lives in the private keys file (chmod 600), not in this script.
+: "${QB_PASS:=$(sed -n 's/^QBIT_PASS=//p' "$HOME/.config/status-dashboard/media-keys.env" 2>/dev/null)}"
 QB_COOKIE=$(mktemp)
 curl -s -c "$QB_COOKIE" -X POST http://localhost:8080/api/v2/auth/login \
     --data-urlencode "username=$QB_USER" --data-urlencode "password=$QB_PASS" >/dev/null 2>&1
