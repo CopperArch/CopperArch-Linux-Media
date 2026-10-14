@@ -39,7 +39,7 @@ class Platform:
         "rsync":         ("rsync",                  "rsync",               "rsync",          "rsync"),
         "unzip":         ("unzip",                  "unzip",               "unzip",          "unzip"),
         "mergerfs":      ("mergerfs",               "mergerfs",            None,             "mergerfs"),
-        "ufw":           ("ufw",                    "ufw",                 None,             None),
+        "ufw":           ("ufw",                    "ufw",                 "ufw",            None),
         "xrandr":        ("x11-xserver-utils",      "xrandr",              "xorg-xrandr",    "xrandr"),
         "tmux":          ("tmux",                   "tmux",                "tmux",           "tmux"),
         "zstd":          ("zstd",                   "zstd",                "zstd",           "zstd"),
@@ -172,8 +172,13 @@ class Platform:
         return q.returncode == 0
 
     def firewall_open(self, sudo, ports: list[tuple[int, str]]) -> None:
-        """Best-effort firewall: ufw (apt) / firewalld (dnf) / none (arch note)."""
-        if self.family == "apt" and have("ufw"):
+        """Best-effort firewall: ufw (apt, pacman) / firewalld (dnf)."""
+        if self.family in ("apt", "pacman") and have("ufw"):
+            if self.family == "pacman":
+                # Arch ships ufw.service disabled; without it the rules are
+                # not loaded at boot. It only starts the firewall once
+                # `ufw enable` has been run, so enabling it opens nothing.
+                sudo.run(["systemctl", "enable", "ufw"], timeout=60)
             for port, proto in ports:
                 sudo.run(["ufw", "allow", f"{port}/{proto}"], timeout=60)
             return
@@ -184,6 +189,6 @@ class Platform:
                           "--add-port", f"{port}/{proto}"], timeout=60)
             sudo.run(["firewall-cmd", "--reload"], timeout=60)
             return
-        # arch: ufw is AUR-only; leave the firewall untouched and say so.
+        # no ufw/firewalld installed: leave the firewall untouched and say so.
         print("  [SKIP] no ufw/firewalld — open these ports manually: "
               + ", ".join(f"{p}/{pr}" for p, pr in ports))
