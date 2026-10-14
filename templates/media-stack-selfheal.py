@@ -61,7 +61,19 @@ import urllib.error
 from http.cookiejar import CookieJar
 
 # ── config ───────────────────────────────────────────────────────────────────
-QBIT = {"url": "http://localhost:8080", "user": "{{QBIT_USER}}", "pass": "{{QBIT_PASSWORD}}"}
+def _key(name, path=os.path.expanduser("~/.config/status-dashboard/media-keys.env")):
+    """A value from the private keys file (chmod 600), so no password is
+    written into this script (which is backed up to Nextcloud nightly)."""
+    try:
+        for line in open(path):
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+QBIT = {"url": "http://localhost:8080", "user": "{{QBIT_USER}}", "pass": _key("QBIT_PASS")}
 RADARR = {"url": "http://localhost:7878",
           "key": "3794f810421647a3b2ad0c8e0e597081", "cat": "radarr"}
 SONARR = {"url": "http://localhost:8989",
