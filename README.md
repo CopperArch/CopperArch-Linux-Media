@@ -160,9 +160,11 @@ Notes:
 - **Arch**: `mergerfs` lives in the AUR — the installer skips it and prints
   what to do; everything else installs from the official repos.
 - **Fedora**: Docker CE is installed from Docker's official repository.
-- **Firewall** is best-effort: `ufw` on Debian-family and Arch (from Arch's
-  official `extra` repo; the installer also enables `ufw.service` there so
-  the rules load at boot), `firewalld` on Fedora.
+- **Firewall**: the installer leaves the host firewall alone (ports Docker
+  publishes go straight past it anyway). If `ufw` (Debian-family, or Arch's
+  official `extra` repo) or `firewalld` (Fedora, openSUSE) is installed, the
+  nightly security check keeps it switched on. On Arch also run
+  `sudo systemctl enable ufw` once, or ufw is off again after a reboot.
 - The **nightly routine is one script for every distro.** The parts that
   differ are in `daily-routine-distro.sh`:
 
