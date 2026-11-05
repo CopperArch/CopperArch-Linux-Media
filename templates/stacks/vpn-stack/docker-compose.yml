@@ -35,7 +35,8 @@ services:
     ports:
       - 6881:6881/tcp
       - 6881:6881/udp
-      - 8080:8080/tcp
+      - 127.0.0.1:8080:8080/tcp     # qBittorrent WebUI: this machine + home LAN only
+      - {{LAN_IP}}:8080:8080/tcp
       - 127.0.0.1:8989:8989
       - 127.0.0.1:7878:7878
       - 127.0.0.1:9696:9696

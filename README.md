@@ -265,6 +265,15 @@ the stack as `.env.bak-<date>`.
    skipped) if a container doesn't come back running. **Skip** on the
    dashboard still holds an image back. As its very last step the routine
    reboots the machine if an update needs it (a new kernel, for example).
+   The security pass (`security-check.sh`) ends with `intrusion-check.py`:
+   a ClamAV scan of files changed in the last day (the whole home folder on
+   Sundays), an rkhunter rootkit scan, SSH/sudo/Jellyfin/Nextcloud login
+   checks (logins from outside the LAN/Tailscale, password guessing), and
+   anything new since the last accepted state — user accounts, admin
+   members, SSH keys, sudoers files, cron jobs, services, listening ports,
+   programs talking to the internet. Problems are e-mailed;
+   `intrusion-check.py --accept` records a change you made yourself.
+   qBittorrent's WebUI is published on localhost and the LAN address only.
    VPN IP rotation retries up to 3 restarts before giving up (a
    single bad exit node used to leave the tunnel dead for hours), and both
    it and the hourly `gluetun-rotate.sh` cron alert by email
