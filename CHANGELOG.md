@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.13 - 2026-11-05
+- Nightly intrusion & malware check; qBittorrent WebUI LAN-only (#26)
+
 ## 0.10.12 - 2026-11-05
 - Auto-apply container updates, English-only audio, qBittorrent peer check, reboot when needed (#25)
 
