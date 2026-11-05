@@ -706,16 +706,34 @@ fi
 # recreate-together safety fix (2026-08-09 note above) still applies — it's
 # inside docker-update-gate.py's `apply` now, just triggered by a dashboard
 # click instead of running unconditionally at 3am.
+#
+# 2026-11-05, user request: apply them automatically again. `auto` checks,
+# then applies each pending update (DB dump before nextcloud-db, image
+# rollback + skip if a container doesn't come back). A dashboard Skip still
+# holds an image back. qBittorrent's peer check runs after, since a gluetun
+# recreate can leave it bound to the dead tunnel.
 if ! $QUICK; then
-    banner "Docker Image Updates (check only — apply/skip from the dashboard)"
+    banner "Docker Image Updates (auto-apply)"
     if [[ -x "$ROOT/.local/bin/docker-update-gate.py" ]]; then
-        "$ROOT/.local/bin/docker-update-gate.py" check 2>&1 | tee -a "$LOG"
+        "$ROOT/.local/bin/docker-update-gate.py" auto 2>&1 | tee -a "$LOG"
+        python3 "$ROOT/.local/bin/media-stack-selfheal.py" --qbit-peers 2>&1 | tee -a "$LOG"
     else
         log "  [SKIP] docker-update-gate.py not found"
     fi
 else
-    log "Skipping Docker update checks (--quick)"
+    log "Skipping Docker updates (--quick)"
 fi
 
 banner "Daily Routine complete"
 log "Log saved to: $LOG"
+
+# ─── 12. Reboot if an update needs one (2026-11-05, user request) ───────────
+# Last thing the routine does, so every step above has finished. Needs the
+# NOPASSWD sudoers entry for /usr/bin/systemctl reboot; skipped in --quick.
+if ! $QUICK && REBOOT_WHY=$(reboot_needed); then
+    log "  [OK]   Rebooting to finish updates ($REBOOT_WHY)"
+    sync
+    if ! sudo -n /usr/bin/systemctl reboot 2>/dev/null; then
+        warn "  [WARN] Reboot required ($REBOOT_WHY) but no passwordless sudo for systemctl reboot"
+    fi
+fi

@@ -205,3 +205,8 @@ elif [ "$NEW" = "$OLD" ]; then
 else
   log "rotated ${OLD:-unknown} -> ${NEW}"
 fi
+
+# A tunnel cycle can leave qBittorrent bound to the dead tunnel (DHT 0, every
+# torrent stuck in metaDL); the self-heal peer check rebinds it if so.
+sleep 30
+python3 "${HOME}/.local/bin/media-stack-selfheal.py" --qbit-peers >> "$LOG" 2>&1 || true

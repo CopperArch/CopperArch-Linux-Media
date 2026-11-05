@@ -146,6 +146,41 @@ MALWARE_FORMAT_PATTERN = (
     r"(?i)[\.\-_ ](exe|scr|bat|cmd|com|pif|vbs|vbe|js|jse|wsf|msi|ps1|lnk)$")
 MALWARE_FORMAT_SCORE = -10000
 
+# English-only audio (2026-11-05, at the user's request): any release that is
+# not English, or carries ANY non-English audio track (dual/multi, ITA ENG,
+# dubs), is rejected outright in every quality profile. Before this the
+# "foreign track present" formats were only -50, so English+Italian etc. still
+# got grabbed. Formats are created if missing; scores are re-pinned nightly.
+ENGLISH_ONLY_SCORE = -10000
+_FOREIGN_MARKERS = [
+    r"\b(ita|italian)\b", r"\b(spanish|castellano|latino|espanol|español)\b",
+    r"\b(french|truefrench|vff|vfq|vostfr)\b", r"\b(german|deutsch)\b",
+    r"\b(hindi|tamil|telugu|kannada|malayalam|bengali|punjabi|marathi)\b",
+    r"\b(dublado|legendado|legenda|legendas)\b", r"\bdual[\s._-]?audio\b",
+    r"\b(russian|polish|lektor|ukrainian|rus)\b",
+    r"\b(korean|japanese|mandarin|cantonese|chinese)\b", r"\bmulti\b",
+    r"\bdual\b", r"\b(nordic|swedish|danish|norwegian|finnish)\b",
+    r"\b(turkish|greek|hebrew|thai|vietnamese|indonesian)\b",
+    r"\b(hun|hungarian|cze|czech|slovak|romanian|bulgarian)\b",
+    r"\b(por|portuguese|brazilian|dublat)\b", r"\b(esp|fra|ger|deu|rus|ita)\b",
+]
+ENGLISH_ONLY_FORMATS = {
+    # Language 1 = English in both Radarr and Sonarr.
+    "Not English": [{
+        "name": "English", "implementation": "LanguageSpecification",
+        "negate": True, "required": True,
+        "fields": [{"name": "value", "value": 1}]}],
+    "Foreign Audio Present": [{
+        "name": "Any non-English track", "implementation": "LanguageSpecification",
+        "negate": False, "required": True,
+        "fields": [{"name": "value", "value": 1},
+                   {"name": "exceptLanguage", "value": True}]}],
+    "Foreign Language Markers": [{
+        "name": p, "implementation": "ReleaseTitleSpecification",
+        "negate": False, "required": False,
+        "fields": [{"name": "value", "value": p}]} for p in _FOREIGN_MARKERS],
+}
+
 # Trackers that sit behind Cloudflare and therefore MUST carry the
 # `flaresolverr` tag, or Prowlarr queries them directly and every request dies
 # on the challenge page. This is the known-bad list; verify_indexers() also
@@ -455,6 +490,59 @@ def reconcile_prefs(opener):
     qbit_post(opener, "/api/v2/app/setPreferences",
               {"json": json.dumps(DESIRED_PREFS)})
     log("  [OK]   queue settings reapplied")
+
+
+def qbit_peer_health(opener):
+    """Make sure qBittorrent can actually reach peers, not just that it's up.
+
+    2026-11-05: after a VPN tunnel cycle (hourly rotation, or the one
+    daily-routine.sh does right before this) libtorrent can stay bound to the
+    dead tunnel: the WebUI answers, the container is "Up", but DHT has 0 nodes
+    and every torrent sits in metaDL at 0 B/s forever. Re-setting the listen
+    port forces libtorrent to rebind its sockets, which fixed it instantly.
+    Returns True if qBittorrent is healthy (or was healed).
+    """
+    log("qBittorrent peer connectivity:")
+
+    def state():
+        info = qbit_get(opener, "/api/v2/transfer/info")
+        return info.get("connection_status", "unknown"), info.get("dht_nodes", 0)
+
+    try:
+        prefs = qbit_get(opener, "/api/v2/app/preferences")
+        conn, dht = state()
+    except Exception as e:
+        log(f"  [FAIL] can't read qBittorrent status: {e}")
+        alert(f"qBittorrent API not answering: {e}")
+        return False
+    dht_on = prefs.get("dht", False)
+    healthy = conn != "disconnected" and (dht > 0 or not dht_on)
+    if healthy:
+        log(f"  [OK]   connection={conn}, DHT nodes={dht}")
+        return True
+    port = prefs.get("listen_port", 6881)
+    for attempt in range(2):
+        log(f"  [FIX ] connection={conn}, DHT nodes={dht} — rebinding listen "
+            f"port {port} (attempt {attempt + 1})")
+        try:
+            qbit_post(opener, "/api/v2/app/setPreferences",
+                      {"json": json.dumps({"listen_port": port + 1})})
+            time.sleep(3)
+            qbit_post(opener, "/api/v2/app/setPreferences",
+                      {"json": json.dumps({"listen_port": port})})
+            time.sleep(60)
+            conn, dht = state()
+        except Exception as e:
+            log(f"  [FAIL] rebind failed: {e}")
+            continue
+        if conn != "disconnected" and (dht > 0 or not dht_on):
+            log(f"  [OK]   recovered: connection={conn}, DHT nodes={dht}")
+            return True
+    log(f"  [WARN] qBittorrent still has no peers (connection={conn}, "
+        f"DHT nodes={dht})")
+    alert(f"qBittorrent can't reach any peers (connection={conn}, DHT "
+          f"nodes={dht}) even after rebinding its port — check gluetun")
+    return False
 
 
 def dead_torrents(opener):
@@ -1333,6 +1421,61 @@ def reconcile_malware_format(arr, name):
     return cf_id
 
 
+def reconcile_english_only(arr, name):
+    """Ensure the English-only custom formats exist and are scored
+    ENGLISH_ONLY_SCORE in every quality profile, so no release with a
+    non-English audio track is ever grabbed."""
+    hdr = {"X-Api-Key": arr["key"], "Content-Type": "application/json"}
+    try:
+        cfs = {c["name"]: c["id"] for c in arr_get(arr, "/customformat")}
+    except Exception as e:
+        log(f"  [FAIL] {name}: can't read custom formats ({e})")
+        return
+    for fmt, specs in ENGLISH_ONLY_FORMATS.items():
+        if fmt in cfs:
+            continue
+        try:
+            cf = json.load(request(
+                "POST", f"{arr['url']}/api/v3/customformat", hdr,
+                json.dumps({"name": fmt, "includeCustomFormatWhenRenaming": False,
+                            "specifications": specs}).encode()))
+            cfs[fmt] = cf["id"]
+            log(f"  [FIX ] {name}: recreated missing '{fmt}' custom format")
+            alert(f"{name}: English-only custom format '{fmt}' was missing "
+                  f"and has been recreated")
+        except Exception as e:
+            log(f"  [FAIL] {name}: could not create '{fmt}' ({e})")
+    ids = {cfs[f] for f in ENGLISH_ONLY_FORMATS if f in cfs}
+    try:
+        profiles = arr_get(arr, "/qualityprofile")
+    except Exception as e:
+        log(f"  [FAIL] {name}: can't read quality profiles ({e})")
+        return
+    fixed = []
+    for qp in profiles:
+        changed = False
+        for item in qp.get("formatItems", []):
+            if item["format"] in ids and item.get("score") != ENGLISH_ONLY_SCORE:
+                item["score"] = ENGLISH_ONLY_SCORE
+                changed = True
+        if not changed:
+            continue
+        try:
+            request("PUT", f"{arr['url']}/api/v3/qualityprofile/{qp['id']}",
+                    hdr, json.dumps(qp).encode())
+            fixed.append(qp["name"])
+        except Exception as e:
+            log(f"  [FAIL] {name}: could not fix profile '{qp['name']}' ({e})")
+    if fixed:
+        log(f"  [FIX ] {name}: English-only scores re-pinned in: "
+            f"{', '.join(fixed)}")
+        alert(f"{name}: English-only audio scores had drifted in "
+              f"{len(fixed)} profile(s), corrected to {ENGLISH_ONLY_SCORE}")
+    else:
+        log(f"  [OK]   {name}: English-only audio enforced in all "
+            f"{len(profiles)} profiles")
+
+
 def verify_malware_format(arr, name, cf_id):
     """Prove end-to-end that a disguised-executable release is actually
     rejected by the real grab-decision pipeline, not just present in config.
@@ -1909,6 +2052,7 @@ def main():
     dead = []
     if opener:
         reconcile_prefs(opener)
+        qbit_peer_health(opener)
         dead = dead_torrents(opener)
         log(f"Dead-download scan: {len(dead)} torrent(s) dead "
             f"(no full copy reachable; >{DEAD_NO_SEED_AGE_H}h with zero "
@@ -1938,6 +2082,10 @@ def main():
     sonarr_malware_cf = reconcile_malware_format(SONARR, "Sonarr")
     verify_malware_format(RADARR, "Radarr", radarr_malware_cf)
     verify_malware_format(SONARR, "Sonarr", sonarr_malware_cf)
+
+    log("English-only audio:")
+    reconcile_english_only(RADARR, "Radarr")
+    reconcile_english_only(SONARR, "Sonarr")
 
     if dead:
         log("Clearing dead downloads (blocklist + re-search):")
@@ -1974,6 +2122,14 @@ def main():
 
 
 if __name__ == "__main__":
+    # --qbit-peers: just the qBittorrent peer check, run by gluetun-rotate.sh
+    # after every hourly tunnel cycle (the thing that wedges it).
+    if "--qbit-peers" in sys.argv[1:]:
+        o = qbit_login()
+        if o:
+            qbit_peer_health(o)
+        flush_alerts()
+        sys.exit(0)
     try:
         main()
     except Exception as e:

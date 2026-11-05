@@ -95,7 +95,7 @@ Repo: `github.com/CopperArch/CopperArch-Linux-Media` (renamed from
 | **Media stack** | Plex, Jellyfin, Immich (+DB/ML), Nextcloud stack, Seerr, Portainer, Tugtainer, WatchState, Caddy reverse proxy |
 | **VPN stack** | Gluetun (VPN hub), qBittorrent, Sonarr, Radarr, Prowlarr, Seerr-v2, FlareSolverr/Byparr, KasmVNC Chrome (magnet handler wired to qBittorrent) |
 | **Dashboard** | Local status page (loopback-only HTTP server), live host gauges (2 s) and a 10 s collector, one-click repair API (origin-guarded, whitelisted fixes only), terminal panes via ttyd (`--check-origin`), desktop window with below-layer KWin rule |
-| **Self-healing** | Nightly `daily-routine.sh` at 03:00: SMART health, security & firewall check, container crash-loop detection, VPN IP rotation, qBittorrent queue self-heal, media-stack auto-update with verify+rollback, dashboard re-install on drift, docker log-rotation guard, backups, system updates |
+| **Self-healing** | Nightly `daily-routine.sh` at 03:00: SMART health, security & firewall check, container crash-loop detection, VPN IP rotation, qBittorrent queue + peer self-heal, English-only audio, automatic container updates with rollback, reboot when needed, media-stack auto-update with verify+rollback, dashboard re-install on drift, docker log-rotation guard, backups, system updates |
 | **Cron jobs** | Daily routine, DuckDNS updater, wastebin emptier, hourly VPN exit rotation |
 | **Local AI** *(opt-in, off by default)* | Ollama + Z.ai's official open-weights GLM, sized to the machine's RAM (`glm-4.7-flash`, 19 GB, on ≥24 GB RAM; otherwise `glm4:9b`, 5.5 GB). Free and offline; adds GLM chat/ask panes to the dashboard only on machines where it was chosen, models stored on the media pool, updated nightly |
 
@@ -253,12 +253,19 @@ the stack as `.env.bak-<date>`.
    policy, auto-updates the arr stack with verify+auto-rollback (including a
    60-day cap so a hard-pinned tag or a remembered-bad image is never
    skipped forever), and runs `media-stack-selfheal.py` (qBittorrent queue +
-   dead-torrent recovery). Everything else (Immich, Portainer, Tugtainer,
-   WatchState, Caddy, gluetun, Prowlarr's own dependency `flaresolverr`) is
-   pulled and checked nightly by `docker-update-gate.py` but never
-   auto-applied — a genuinely newer image just flags an amber "update
-   available" bubble on the dashboard, and you choose Update or Skip from
-   there. VPN IP rotation retries up to 3 restarts before giving up (a
+   dead-torrent recovery, plus a peer check that rebinds qBittorrent's port
+   when a VPN reconnect leaves it with 0 DHT nodes and every torrent stuck —
+   also run after each hourly rotation — and English-only audio: any release
+   with a non-English audio track is rejected in every Sonarr/Radarr
+   profile). Everything else (Immich, Portainer, Tugtainer, WatchState,
+   Caddy, gluetun, Prowlarr's own dependency `flaresolverr`) is updated
+   nightly by `docker-update-gate.py auto`: a database dump before any
+   Nextcloud DB update, gluetun recreated together with every container
+   sharing its network, and an automatic rollback (that image is then
+   skipped) if a container doesn't come back running. **Skip** on the
+   dashboard still holds an image back. As its very last step the routine
+   reboots the machine if an update needs it (a new kernel, for example).
+   VPN IP rotation retries up to 3 restarts before giving up (a
    single bad exit node used to leave the tunnel dead for hours), and both
    it and the hourly `gluetun-rotate.sh` cron alert by email
    (`send-alert.py`, debounced so a prolonged outage sends one mail, not one
