@@ -19,6 +19,11 @@ Three subcommands:
                  namespace the siblings joined via network_mode:
                  service:gluetun). Called synchronously from the dashboard's
                  "Update" button.
+  auto           check, then apply every pending (non-skipped) update, with
+                 a DB dump before nextcloud-db and an image rollback if a
+                 container doesn't come back running. Called nightly from
+                 daily-routine.sh since 2026-11-05 (user asked for container
+                 updates to be automatic again; Update/Skip still work).
   skip <name>    remember the currently-pending image id as skipped so it
                  stops flagging until an even newer image shows up. Called
                  from the dashboard's "Skip" button.
@@ -151,8 +156,15 @@ def apply(name):
         print(f"  gluetun owns the VPN network namespace — recreating it with all "
               f"{len(NETNS_SIBLINGS)} netns sibling(s) together to avoid stranding them")
 
-    rc, out = sh(["docker", "compose", "up", "-d", "--no-deps", *up_services],
-                 cwd=compose_dir, timeout=180)
+    # 2026-11-05: --force-recreate for gluetun. Without it `up -d` leaves
+    # siblings whose own image didn't change running in the OLD (destroyed)
+    # namespace — exactly the stranding this group recreate exists to avoid.
+    force = ["--force-recreate"] if name == "gluetun" else []
+    rc, out = sh(["docker", "compose", "up", "-d", "--no-deps", *force, *up_services],
+                 cwd=compose_dir, timeout=300)
+    if rc != 0:
+        print(f"ERROR: recreate failed: {out.strip()[-400:]}", file=sys.stderr)
+        return 1
     if rc != 0:
         print(f"ERROR: recreate failed: {out.strip()[-400:]}", file=sys.stderr)
         return 1
@@ -168,6 +180,56 @@ def apply(name):
     print(f"[OK] {name} updated and running" +
           (f" (with {', '.join(NETNS_SIBLINGS)})" if name == "gluetun" else ""))
     return 0
+
+
+def dump_nextcloud_db():
+    """Full SQL dump before recreating the Nextcloud DB; keeps the last 7."""
+    out_dir = ROOT / "backups/nextcloud-db"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / f"nextcloud-db-{time.strftime('%Y%m%d-%H%M%S')}.sql.gz"
+    rc = subprocess.run(
+        f"docker exec nextcloud-db sh -c 'mariadb-dump --all-databases --single-transaction "
+        f"-uroot -p\"$MARIADB_ROOT_PASSWORD\"' | gzip > '{dest}'", shell=True).returncode
+    ok = rc == 0 and dest.stat().st_size > 100_000
+    for old in sorted(out_dir.glob("nextcloud-db-*.sql.gz"))[:-7]:
+        old.unlink()
+    return ok, dest
+
+
+def auto():
+    check()
+    failed = 0
+    for compose_dir, services in STACK_SERVICES.items():
+        for name in services:
+            p = pending_path(name)
+            if not p.exists():
+                continue
+            pend = json.loads(p.read_text())
+            if name == "nextcloud-db":
+                ok, dest = dump_nextcloud_db()
+                if not ok:
+                    print(f"  WARNING: nextcloud-db dump failed — NOT updating it (left pending)")
+                    failed += 1
+                    continue
+                print(f"  [OK]   nextcloud-db dumped to {dest}")
+            print(f"  [FIX ] {name}: applying update")
+            if apply(name) == 0:
+                continue
+            failed += 1
+            # Roll back: point the tag at the old image again and recreate.
+            ref, old_id = pend.get("image_ref"), pend.get("old_image_id")
+            if ref and old_id and sh(["docker", "tag", old_id, ref])[0] == 0:
+                force = ["--force-recreate"] if name == "gluetun" else []
+                ups = ["gluetun"] + NETNS_SIBLINGS if name == "gluetun" else [name]
+                sh(["docker", "compose", "up", "-d", "--no-deps", *force, *ups],
+                   cwd=compose_dir, timeout=300)
+                write_json(skipped_path(name), {"skipped_image_id": pend.get("new_image_id"),
+                                                "skipped_at": time.time(), "reason": "auto-rollback"})
+                print(f"  WARNING: {name} failed after update — rolled back to {old_id[:19]} "
+                      f"and that image is skipped until a newer one appears")
+            else:
+                print(f"  WARNING: {name} failed after update and rollback was not possible — check manually")
+    return 1 if failed else 0
 
 
 def skip(name):
@@ -190,6 +252,8 @@ def main():
     if cmd == "check":
         check()
         return 0
+    if cmd == "auto":
+        return auto()
     if cmd == "apply" and len(sys.argv) == 3:
         return apply(sys.argv[2])
     if cmd == "skip" and len(sys.argv) == 3:
