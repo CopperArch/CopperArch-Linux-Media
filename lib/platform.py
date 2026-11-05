@@ -43,6 +43,12 @@ class Platform:
         "xrandr":        ("x11-xserver-utils",      "xrandr",              "xorg-xrandr",    "xrandr"),
         "tmux":          ("tmux",                   "tmux",                "tmux",           "tmux"),
         "zstd":          ("zstd",                   "zstd",                "zstd",           "zstd"),
+        # nightly malware + rootkit scans (intrusion-check.py); rkhunter is
+        # AUR-only on Arch and not in openSUSE's main repos
+        "clamav":        ("clamav",                 "clamav",              "clamav",         "clamav"),
+        # freshclam ships inside clamav everywhere except Fedora
+        "freshclam":     (None,                     "clamav-update",       None,             None),
+        "rkhunter":      ("rkhunter",               "rkhunter",            None,             None),
         # checkupdates + paccache, used by the nightly routine on Arch
         "pkg-tools":     (None,                     None,                  "pacman-contrib", None),
     }

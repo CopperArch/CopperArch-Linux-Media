@@ -267,4 +267,11 @@ if have tailscale; then
         ok "Tailscale $(tailscale version 2>/dev/null | head -1) is current"
     fi
 fi
+# ── 8. Malware, rootkits, logins and anything new (2026-11-05) ───────────────
+# ClamAV + rkhunter, SSH/sudo/Jellyfin/Nextcloud login audit, and new
+# accounts/keys/services/ports/outbound programs vs. a baseline. E-mails on FAIL.
+if [[ -x "$HOME/.local/bin/intrusion-check.py" ]]; then
+    if $ACCEPT; then "$HOME/.local/bin/intrusion-check.py" --accept
+    else "$HOME/.local/bin/intrusion-check.py"; fi
+fi
 exit 0

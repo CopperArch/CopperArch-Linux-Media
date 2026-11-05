@@ -12,3 +12,5 @@
 {{DASH_USER}} ALL=(root) NOPASSWD: /usr/sbin/ufw --force enable
 # daily-routine.sh step 12: reboot after the routine when an update needs one
 {{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/systemctl reboot
+# intrusion-check.py: nightly rootkit scan
+{{DASH_USER}} ALL=(root) NOPASSWD: /usr/bin/rkhunter --check --sk --rwo --nocolors

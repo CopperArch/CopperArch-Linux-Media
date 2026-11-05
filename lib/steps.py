@@ -41,7 +41,7 @@ def base_packages(ctx: Ctx) -> list[str]:
         # — see dashboard-pane.sh.
         need += ["tkinter", "xrandr", "tmux"]
     if ctx.profile.use_daily_routine:
-        need += ["smartmontools", "ncdu", "pkg-tools"]
+        need += ["smartmontools", "ncdu", "pkg-tools", "clamav", "freshclam", "rkhunter"]
     if ctx.profile.use_local_glm:
         need += ["zstd"]     # ollama's install.sh unpacks a .tar.zst
     if ctx.profile.media_pool and "mergerfs" not in ctx.profile.media_pool:
@@ -368,6 +368,14 @@ def install_scripts(ctx: Ctx) -> tuple[bool, str]:
             else:
                 log(f"  ! {rules.name} did not pass visudo -c; not installed")
             tmp.unlink()
+        # Malware/rootkit scanners for intrusion-check.py: virus definitions
+        # kept current by freshclam, and rkhunter's file database recorded now
+        # (on a fresh, clean install) so later changes stand out.
+        if ctx.profile.use_daily_routine:
+            ctx.sudo.run(["systemctl", "enable", "--now", "clamav-freshclam"],
+                         timeout=120)
+            if Path("/usr/bin/rkhunter").exists():
+                ctx.sudo.run(["rkhunter", "--propupd", "--nocolors"], timeout=600)
         # Power tile: a root service publishes averaged watts from the CPU's
         # RAPL counters (root-only by design) and any GPU energy sensor.
         # Only where such a sensor exists — otherwise the tile stays hidden.
