@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.12 - 2026-11-05
+- Auto-apply container updates, English-only audio, qBittorrent peer check, reboot when needed (#25)
+
 ## 0.10.11 - 2026-10-14
 - Arch: ufw comes from the official repos, not the AUR (#24)
 
