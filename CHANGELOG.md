@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.14 - 2026-11-08
+- Nightly routine: mount data disks that dropped off, stop what crash-loops without them (#27)
+
 ## 0.10.13 - 2026-11-05
 - Nightly intrusion & malware check; qBittorrent WebUI LAN-only (#26)
 
