@@ -135,6 +135,67 @@ for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
 done
 $RESTART_ALERT || log "  [OK]   No containers in a restart loop"
 
+# Data disks from /etc/fstab (/mnt/*) must actually be mounted. A USB disk
+# that drops off the bus leaves its services failing for days while docker
+# quietly creates empty folders on the boot disk in its place. A disk that is
+# attached but not mounted gets mounted and its containers restarted; a disk
+# that is missing gets a [FAIL] to replug it, and containers crash-looping
+# without it are stopped until it is back.
+mount_users() {   # containers with a bind mount at or below $1
+    local c
+    for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+        docker inspect -f '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "$c" 2>/dev/null \
+            | grep -qE "^$1(/|$)" && echo "$c"
+    done
+}
+DISK_STOPPED="$ROOT/.dbmedia/state/stopped-for-missing-disk"   # "mountpoint container" lines
+DISK_ALERT=false
+while read -r src mnt fstype _; do
+    [[ "$src" == \#* || "$mnt" != /mnt/* ]] && continue
+    mountpoint -q "$mnt" && continue
+    DISK_ALERT=true
+    case "$src" in
+        UUID=*)  dev="/dev/disk/by-uuid/${src#UUID=}" ;;
+        LABEL=*) dev="/dev/disk/by-label/${src#LABEL=}" ;;
+        *)       dev="$src" ;;
+    esac
+    users=$(mount_users "$mnt")
+    if [[ "$fstype" == fuse.* || -e "$dev" ]]; then
+        if sudo -n /usr/bin/mount "$mnt" 2>/dev/null && mountpoint -q "$mnt"; then
+            # Running containers still hold the empty folder that was under
+            # the mountpoint, so restart them; start the ones stopped below.
+            redone=""
+            for c in $users; do
+                if [[ "$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)" == true ]]; then
+                    docker restart "$c" >/dev/null 2>&1 && redone="$redone $c"
+                elif grep -qx "$mnt $c" "$DISK_STOPPED" 2>/dev/null; then
+                    docker start "$c" >/dev/null 2>&1 && redone="$redone $c"
+                fi
+            done
+            [[ -f "$DISK_STOPPED" ]] && sed -i "\\#^$mnt #d" "$DISK_STOPPED"
+            warn "  [WARN] Fixed: $mnt was not mounted — mounted it${redone:+ and restarted:$redone}"
+        else
+            warn "  [FAIL] $mnt is attached but will not mount — check 'sudo mount $mnt' and 'journalctl -k'"
+        fi
+    else
+        stopped=""
+        for c in $users; do
+            # Only the ones crash-looping without it (Immich); Plex keeps
+            # serving the rest and Nextcloud refuses its data folder anyway.
+            st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null)
+            [[ "$st" == running || "$st" == restarting ]] || continue
+            [[ "$st" == restarting ||
+               "$(docker inspect -f '{{.RestartCount}}' "$c" 2>/dev/null)" -ge 5 ]] || continue
+            if docker stop "$c" >/dev/null 2>&1; then
+                stopped="$stopped $c"
+                grep -qx "$mnt $c" "$DISK_STOPPED" 2>/dev/null || echo "$mnt $c" >> "$DISK_STOPPED"
+            fi
+        done
+        warn "  [FAIL] Disk for $mnt is not connected (USB dropped?) — unplug and replug it, power too${stopped:+; stopped$stopped because they crash-loop without it}; the next run mounts it and starts them again"
+    fi
+done < /etc/fstab
+$DISK_ALERT || log "  [OK]   All data disks in /etc/fstab are mounted"
+
 # ─── 1c. Pending updates & reboot status (report-only; applied in step 10) ──
 banner "Pending Updates & Reboot Status"
 PKG_MGR=$(pkg_manager_name)

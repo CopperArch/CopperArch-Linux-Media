@@ -262,13 +262,22 @@ def write_secret_env(path: Path, env: dict) -> None:
 def _exact_sudo_rules(text: str) -> str:
     """sudo-rs (Ubuntu's sudo since 25.10) refuses wildcards in command
     arguments, and visudo then rejects the whole file. Write those rules out
-    exactly: one smartctl line per disk present, and the journal cleanup with
-    the retention the routine actually uses. USB disks are left out (the
+    exactly: one smartctl line per disk present, one mount line per /mnt
+    mountpoint in /etc/fstab, and the journal cleanup with the retention the
+    routine actually uses. USB disks are left out (the
     routine does not check them unless asked to), and the characters sudoers
     treats as syntax are escaped."""
     disks = sorted(str(d) for d in Path("/dev/disk/by-id").glob("*")
                    if d.name.startswith(("ata-", "nvme-", "scsi-"))
                    and "-part" not in d.name and not d.name.startswith("nvme-eui."))
+    # The data mountpoints the routine may mount again (/mnt/* in fstab).
+    try:
+        fstab = Path("/etc/fstab").read_text().splitlines()
+    except OSError:
+        fstab = []
+    mounts = sorted({f[1] for f in (l.split() for l in fstab)
+                     if len(f) > 1 and not f[0].startswith("#")
+                     and f[1].startswith("/mnt/")})
     out = []
     for line in text.splitlines():
         if "smartctl -H -A /dev/disk/by-id/*" in line:
@@ -276,6 +285,9 @@ def _exact_sudo_rules(text: str) -> str:
                                  re.sub(r"([\\:,=])", r"\\\1", d)) for d in disks]
         elif "--vacuum-time=*" in line:
             out.append(line.replace("--vacuum-time=*", "--vacuum-time=14d"))
+        elif line.endswith("/usr/bin/mount /mnt/*"):
+            out += [line[:-len("/mnt/*")] + re.sub(r"([\\:,=])", r"\\\1", m)
+                    for m in mounts]
         else:
             out.append(line)
     return "\n".join(out) + "\n"
