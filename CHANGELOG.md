@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.17 - 2026-11-12
+- Self-heal: re-login to qBittorrent on 403, longer timeout for dual-audio fallback (#30)
+
 ## 0.10.16 - 2026-11-10
 - Self-heal: English-dub fallback for foreign-original titles (#29)
 
