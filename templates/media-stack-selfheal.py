@@ -163,6 +163,10 @@ _FOREIGN_MARKERS = [
     r"\b(turkish|greek|hebrew|thai|vietnamese|indonesian)\b",
     r"\b(hun|hungarian|cze|czech|slovak|romanian|bulgarian)\b",
     r"\b(por|portuguese|brazilian|dublat)\b", r"\b(esp|fra|ger|deu|rus|ita)\b",
+    # 2026-11-08: dual-audio cam tags like "CAM.1080p.IT.EN" / "AR.EN" slipped
+    # through (Radarr parses them as English only).
+    r"\b(it|ar|fr|es|de|ru|hi|tr|pl|pt|ua|ko|ja|zh|nl|sv|fa|ur)[\s._-]en\b",
+    r"\ben[\s._-](it|ar|fr|es|de|ru|hi|tr|pl|pt|ua|ko|ja|zh|nl|sv|fa|ur)\b",
 ]
 ENGLISH_ONLY_FORMATS = {
     # Language 1 = English in both Radarr and Sonarr.
@@ -195,6 +199,12 @@ CLOUDFLARE_INDEXERS = {"EZTV", "LimeTorrents", "Uindex", "Torrent Downloads"}
 # over every indexer, and hammering trackers is how this box earned an IP ban.
 WANTED_SEARCH_BATCH = 12
 WANTED_RETRY_DAYS = 3
+# 2026-11-08: owned movies are re-searched for an IMAX release in small nightly
+# batches (Radarr only sees upgrades on RSS, and old IMAX releases never
+# reappear there). 10/night with a 30-day per-movie cooldown ≈ whole library
+# every ~40 nights without hammering indexers.
+IMAX_UPGRADE_BATCH = 10
+IMAX_RETRY_DAYS = 30
 # Dual-audio fallback (2026-11-10). English-only rejects every release that
 # carries a non-English track, so a foreign-original title (e.g. the French
 # "Campus Drivers") that only exists as French or as "DUAL" (original + English
@@ -216,7 +226,13 @@ SEERR_INSTANCES = [
 
 # Containers that must be running.
 CONTAINERS = ["gluetun", "qbittorrent", "radarr", "sonarr", "prowlarr",
-              "flaresolverr", "jellyseerr", "overseerr", "plex", "jellyfin"]
+              "flaresolverr", "jellyseerr", "chrome",
+              "overseerr", "plex", "jellyfin", "caddy", "watchstate",
+              "immich-server", "immich-machine-learning", "immich-postgres",
+              "immich-redis"]
+# Every container the stacks define is listed: a flaky network link once left
+# caddy/immich-server/watchstate/chrome deleted across three reboots and
+# nothing put them back, because only 10 of them were listed here.
 
 # Which compose project each container belongs to, so a container that has been
 # *deleted* (not merely stopped) can be recreated rather than silently skipped.
@@ -239,6 +255,13 @@ COMPOSE_DIRS = {
     "overseerr":    f"{HOME}/docker/media-stack",
     "plex":         f"{HOME}/docker/media-stack",
     "jellyfin":     f"{HOME}/docker/media-stack",
+    "chrome":       f"{HOME}/docker/vpn-stack",
+    "caddy":        f"{HOME}/docker/media-stack",
+    "watchstate":   f"{HOME}/docker/media-stack",
+    "immich-server":           f"{HOME}/docker/media-stack",
+    "immich-machine-learning": f"{HOME}/docker/media-stack",
+    "immich-postgres":         f"{HOME}/docker/media-stack",
+    "immich-redis":            f"{HOME}/docker/media-stack",
 }
 
 # Recreating gluetun tears down the shared network namespace, so every container
@@ -521,6 +544,89 @@ def reconcile_prefs(opener):
     qbit_post(opener, "/api/v2/app/setPreferences",
               {"json": json.dumps(DESIRED_PREFS)})
     log("  [OK]   queue settings reapplied")
+
+
+def qbit_bind_tun0(opener):
+    """Keep qBittorrent bound to gluetun's tunnel interface.
+
+    2026-11-08: with the default "any interface", libtorrent opens sockets on
+    eth0/eth1 too. Traffic from those bypasses tun0 and gluetun's kill-switch
+    drops it (~40 pkts/min: tracker announces failing with "Operation not
+    permitted", peer connects lost). Binding to tun0 stopped the drops.
+    """
+    try:
+        cur = qbit_get(opener, "/api/v2/app/preferences").get("current_network_interface", "")
+    except Exception as e:
+        log(f"  [WARN] can't read qBittorrent interface binding: {e}")
+        return
+    if cur == "tun0":
+        log("  [OK]   qBittorrent bound to tun0")
+        return
+    qbit_post(opener, "/api/v2/app/setPreferences",
+              {"json": json.dumps({"current_network_interface": "tun0",
+                                   "current_interface_address": ""})})
+    log(f"  [FIX ] qBittorrent interface was {cur!r} -> tun0")
+    alert(f"qBittorrent network interface had drifted to {cur!r}; re-bound to tun0 "
+          "(otherwise gluetun's kill-switch drops part of its traffic).")
+
+
+EXEC_FILE_RE = re.compile(
+    r"(?i)\.(exe|scr|bat|cmd|com|pif|vbs|vbe|js|jse|wsf|msi|ps1|lnk)$")
+
+
+def purge_executable_torrents(opener):
+    """Remove + blocklist any torrent whose file list contains an executable.
+
+    2026-11-08: indexers like TorrentDownload strip punctuation from release
+    names ("...WEB DL ... FLUX"), so the Radarr title filter never sees the
+    ".exe" -- it only shows up in the torrent's own file list. qBittorrent's
+    excluded_file_names stops the file being written, but the torrent then sat
+    at 0 bytes until the 48h dead-torrent sweep. This catches it as soon as
+    metadata arrives (runs hourly via --qbit-peers) and lets the *arr
+    re-search for a genuine release.
+    """
+    try:
+        torrents = qbit_get(opener, "/api/v2/torrents/info")
+    except Exception as e:
+        log(f"  [WARN] can't list torrents for executable scan: {e}")
+        return
+    arrs = {RADARR["cat"]: RADARR, SONARR["cat"]: SONARR}
+    hits = []
+    for t in torrents:
+        if t.get("state") in ("metaDL", "forcedMetaDL"):
+            continue
+        try:
+            files = qbit_get(opener, f"/api/v2/torrents/files?hash={t['hash']}")
+        except Exception:
+            continue
+        bad = [f["name"] for f in files if EXEC_FILE_RE.search(f.get("name", ""))]
+        if bad:
+            hits.append((t, bad))
+    if not hits:
+        log("  [OK]   no executables in any torrent")
+        return
+    for t, bad in hits:
+        arr = arrs.get(t.get("category", ""))
+        removed_via_arr = False
+        if arr:
+            try:
+                q = arr_get(arr, "/queue?pageSize=500")
+                rec = next((r for r in q.get("records", [])
+                            if (r.get("downloadId") or "").lower() == t["hash"].lower()), None)
+                if rec:
+                    request("DELETE", f"{arr['url']}/api/v3/queue/{rec['id']}"
+                            "?removeFromClient=true&blocklist=true&skipRedownload=false",
+                            {"X-Api-Key": arr["key"]})
+                    removed_via_arr = True
+            except Exception as e:
+                log(f"  [WARN] {arr['cat']}: couldn't blocklist {t['name']}: {e}")
+        if not removed_via_arr:
+            qbit_post(opener, "/api/v2/torrents/delete",
+                      {"hashes": t["hash"], "deleteFiles": "true"})
+        how = "removed + blocklisted, re-search queued" if removed_via_arr else "deleted from qBittorrent"
+        log(f"  [FIX ] MALWARE torrent {t['name']!r} contained {bad[:3]} -- {how}")
+        alert(f"Malware torrent caught: {t['name']} contained executable(s) "
+              f"{', '.join(bad[:3])}. {how}.")
 
 
 def qbit_peer_health(opener):
@@ -1584,6 +1690,8 @@ def _wanted_state():
 def _save_wanted_state(st):
     # Prune anything past its cooldown so the file can't grow without bound.
     def ttl(k):
+        if k.startswith("radarr-imax:"):
+            return IMAX_RETRY_DAYS * 86400
         if "-dual:" in k:
             return DUAL_FALLBACK_RETRY_DAYS * 86400
         return WANTED_RETRY_DAYS * 86400
@@ -1649,9 +1757,13 @@ def grab_wanted():
         recs = w.get("records", [])
         # Radarr status: tba / announced / inCinemas / released / deleted.
         # Only "released" means a digital release exists to look for.
+        # 2026-11-08: movies on the early-copy profile (minimumAvailability
+        # inCinemas) have something to find from cinema release onwards.
         want = pick("radarr", recs,
-                    lambda r: r.get("status") == "released"
-                    and not r.get("hasFile"))
+                    lambda r: not r.get("hasFile") and (
+                        r.get("status") == "released" or
+                        (r.get("status") == "inCinemas" and
+                         r.get("minimumAvailability") == "inCinemas")))
         skipped = len(recs) - sum(1 for r in recs
                                   if r.get("status") == "released")
         if want:
@@ -1673,6 +1785,49 @@ def grab_wanted():
         log(f"  [FAIL] Radarr wanted search failed ({e})")
         alert(f"Radarr backlog search failed ({e}) — requested movies will "
               f"stay stuck in 'processing'")
+
+    # ── Radarr: IMAX upgrade trickle ─────────────────────────────────────────
+    try:
+        # Radarr's /wanted/cutoff only judges the QUALITY cutoff, not the
+        # custom-format one, so build the list ourselves: owned, monitored,
+        # on an upgrade profile, and the current file isn't already IMAX.
+        upgrade_profiles = {p["id"] for p in arr_get(RADARR, "/qualityprofile")
+                            if p.get("upgradeAllowed")
+                            and (p.get("cutoffFormatScore") or 0) >= 100}
+        imax_re = re.compile(r"\bIMAX\b", re.I)
+        cands = []
+        for m in arr_get(RADARR, "/movie"):
+            mf = m.get("movieFile") or {}
+            if not (m.get("hasFile") and m.get("monitored")
+                    and m.get("qualityProfileId") in upgrade_profiles):
+                continue
+            if imax_re.search(f"{mf.get('relativePath','')} {mf.get('sceneName') or ''}"):
+                continue
+            cands.append(m)
+        w = {"totalRecords": len(cands)}
+        out = []
+        for rec in cands:
+            if len(out) >= IMAX_UPGRADE_BATCH:
+                break
+            key = f"radarr-imax:{rec['id']}"
+            if now - st.get(key, 0) < IMAX_RETRY_DAYS * 86400:
+                continue
+            st[key] = now
+            out.append(rec)
+        if out:
+            request("POST", f"{RADARR['url']}/api/v3/command",
+                    {"X-Api-Key": RADARR["key"],
+                     "Content-Type": "application/json"},
+                    json.dumps({"name": "MoviesSearch",
+                                "movieIds": [r["id"] for r in out]}).encode())
+            log(f"  [OK]   Radarr: IMAX-upgrade search for {len(out)} owned "
+                f"movie(s) ({w.get('totalRecords')} without IMAX): "
+                + ", ".join(r["title"][:24] for r in out[:5])
+                + (" ..." if len(out) > 5 else ""))
+        else:
+            log("  [OK]   Radarr: IMAX-upgrade batch idle (all on cooldown)")
+    except Exception as e:
+        log(f"  [WARN] Radarr IMAX-upgrade search failed ({e})")
 
     # ── Sonarr ───────────────────────────────────────────────────────────────
     try:
@@ -1780,7 +1935,7 @@ def _rank(rel):
 
 
 def _arr_get_slow(arr, path):
-    # The fallback runs right after the wanted-search has queued a burst of
+    # The fallback runs right after grab_wanted() has queued a burst of
     # searches, and a busy Sonarr took >60 s to answer /wanted/missing
     # (2026-11-10 "Sonarr dual-audio fallback failed (timed out)").
     return json.load(request("GET", f"{arr['url']}/api/v3{path}",
@@ -2369,6 +2524,16 @@ def main():
 if __name__ == "__main__":
     # --qbit-peers: just the qBittorrent peer check, run by gluetun-rotate.sh
     # after every hourly tunnel cycle (the thing that wedges it).
+    # --containers: just ensure_containers(), run hourly at the top of
+    # gluetun-rotate.sh so deleted/stopped containers come back within the
+    # hour instead of waiting for the 3am routine (2026-11-08).
+    if "--containers" in sys.argv[1:]:
+        try:
+            ensure_containers()
+        except Exception as e:
+            print(f"    [FAIL] container check crashed: {e}", flush=True)
+        flush_alerts()
+        sys.exit(0)
     if "--dual-fallback" in sys.argv[1:]:
         dual_audio_fallback()
         flush_alerts()
@@ -2376,6 +2541,8 @@ if __name__ == "__main__":
     if "--qbit-peers" in sys.argv[1:]:
         o = qbit_login()
         if o:
+            qbit_bind_tun0(o)
+            purge_executable_torrents(o)
             qbit_peer_health(o)
         flush_alerts()
         sys.exit(0)

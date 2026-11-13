@@ -31,6 +31,11 @@ MAX_TRIES=3
 mkdir -p "$(dirname "$LOG")"
 log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG"; }
 
+# Recreate/start any missing container FIRST. Otherwise a missing gluetun makes
+# this script bail at the "gluetun not running" check below, and nothing heals
+# the stack until the nightly routine.
+python3 "${HOME}/.local/bin/media-stack-selfheal.py" --containers >> "$LOG" 2>&1 || true
+
 [ -r "$KEY_FILE" ] || { log "ERROR: no key at $KEY_FILE"; exit 1; }
 KEY="$(cat "$KEY_FILE")"
 
