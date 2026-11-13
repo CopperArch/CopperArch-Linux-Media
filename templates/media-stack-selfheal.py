@@ -1558,18 +1558,44 @@ def reconcile_malware_format(arr, name):
     return cf_id
 
 
+def _spec_value(sp):
+    """The "value" field of a custom-format specification (regex, language id)."""
+    for f in sp.get("fields", []):
+        if f.get("name") == "value":
+            return f.get("value")
+    return None
+
+
 def reconcile_english_only(arr, name):
     """Ensure the English-only custom formats exist and are scored
     ENGLISH_ONLY_SCORE in every quality profile, so no release with a
     non-English audio track is ever grabbed."""
     hdr = {"X-Api-Key": arr["key"], "Content-Type": "application/json"}
     try:
-        cfs = {c["name"]: c["id"] for c in arr_get(arr, "/customformat")}
+        all_cfs = arr_get(arr, "/customformat")
+        cfs = {c["name"]: c["id"] for c in all_cfs}
+        full = {c["name"]: c for c in all_cfs}
     except Exception as e:
         log(f"  [FAIL] {name}: can't read custom formats ({e})")
         return
     for fmt, specs in ENGLISH_ONLY_FORMATS.items():
         if fmt in cfs:
+            # Existing format: add any pattern added here since it was
+            # created (e.g. the paired cam tags "IT.EN"), or older installs
+            # never get them. Patterns a user added are left alone.
+            cur = full[fmt]
+            have = {(sp.get("implementation"), _spec_value(sp))
+                    for sp in cur.get("specifications", [])}
+            add = [sp for sp in specs
+                   if (sp["implementation"], _spec_value(sp)) not in have]
+            if add:
+                cur["specifications"] = cur.get("specifications", []) + add
+                try:
+                    request("PUT", f"{arr['url']}/api/v3/customformat/{cur['id']}",
+                            hdr, json.dumps(cur).encode())
+                    log(f"  [FIX ] {name}: added {len(add)} new pattern(s) to '{fmt}'")
+                except Exception as e:
+                    log(f"  [WARN] {name}: could not update '{fmt}' ({e})")
             continue
         try:
             cf = json.load(request(
