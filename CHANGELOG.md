@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.20 - 2026-11-15
+- Container updates: force the recreate and check the new image is running (#33)
+
 ## 0.10.19 - 2026-11-13
 - Self-heal: add new English-only patterns to existing custom formats (#32)
 
