@@ -279,7 +279,7 @@ def check_pinned_update(svc, state, now):
     backup_config(svc)
     rc, out = compose(svc, "pull", name, timeout=180)
     if rc == 0:
-        rc, out = compose(svc, "up", "-d", "--no-deps", name)
+        rc, out = compose(svc, "up", "-d", "--no-deps", "--force-recreate", name)
     verifier = VERIFIERS[svc["kind"]]
     ok, detail = (False, f"pull/recreate failed: {out.strip()[-300:]}") if rc != 0 else verifier(svc)
 
@@ -295,7 +295,7 @@ def check_pinned_update(svc, state, now):
     restore_config(svc)
     revert_pinned_tag(svc, old_image, new_image)
     sh(["docker", "tag", old_id, old_image])
-    compose(svc, "up", "-d", "--no-deps", name)
+    compose(svc, "up", "-d", "--no-deps", "--force-recreate", name)
     ok2, detail2 = verifier(svc)
     if ok2:
         warn(f"{name}: reverted to {current_tag} successfully ({detail2})")
@@ -525,7 +525,7 @@ def process(svc):
     baseline_errors = get_arr_health_errors(svc) if svc["kind"] == "arr" else None
     backup_config(svc)
 
-    rc, out = compose(svc, "up", "-d", "--no-deps", name)
+    rc, out = compose(svc, "up", "-d", "--no-deps", "--force-recreate", name)
     if rc != 0:
         warn(f"{name}: docker compose up failed: {out.strip()[-300:]}")
         return
@@ -557,7 +557,7 @@ def process(svc):
         save_state(name, state)
         return
 
-    rc, out = compose(svc, "up", "-d", "--no-deps", name)
+    rc, out = compose(svc, "up", "-d", "--no-deps", "--force-recreate", name)
     if rc != 0:
         warn(f"{name}: CRITICAL — rollback recreate failed: {out.strip()[-300:]}")
         state["known_bad_image_id"] = new_id
