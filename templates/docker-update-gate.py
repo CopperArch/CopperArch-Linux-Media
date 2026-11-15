@@ -104,7 +104,7 @@ def clear(path):
     path.unlink(missing_ok=True)
 
 
-def check():
+def check(auto=False):
     for compose_dir, services in STACK_SERVICES.items():
         if not compose_dir.is_dir():
             print(f"  [SKIP] {compose_dir} not found")
@@ -140,8 +140,11 @@ def check():
                 "old_image_id": old_id, "new_image_id": new_id,
                 "image_ref": ref, "checked_at": time.time(),
             })
-            print(f"  [WARN] {name}: update available ({old_id[:19]} -> {new_id[:19]}), "
-                  f"flagged for manual review on the dashboard")
+            if auto:  # applied straight after this; only a failure is worth a warning
+                print(f"  [OK]   {name}: update available ({old_id[:19]} -> {new_id[:19]}), applying")
+            else:
+                print(f"  [WARN] {name}: update available ({old_id[:19]} -> {new_id[:19]}), "
+                      f"applied automatically tonight (or Update/Skip on the dashboard)")
 
 
 def apply(name):
@@ -156,11 +159,12 @@ def apply(name):
         print(f"  gluetun owns the VPN network namespace — recreating it with all "
               f"{len(NETNS_SIBLINGS)} netns sibling(s) together to avoid stranding them")
 
-    # 2026-11-05: --force-recreate for gluetun. Without it `up -d` leaves
-    # siblings whose own image didn't change running in the OLD (destroyed)
-    # namespace — exactly the stranding this group recreate exists to avoid.
-    force = ["--force-recreate"] if name == "gluetun" else []
-    rc, out = sh(["docker", "compose", "up", "-d", "--no-deps", *force, *up_services],
+    # Always --force-recreate. For gluetun because plain `up -d` leaves
+    # siblings whose own image didn't change in the OLD (destroyed) namespace.
+    # For everything because Compose v5.7 answers `up -d` with "Container X
+    # Running" even when a newer image for its tag has been pulled, so an
+    # update was reported as applied while the old image kept running.
+    rc, out = sh(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", *up_services],
                  cwd=compose_dir, timeout=300)
     if rc != 0:
         print(f"ERROR: recreate failed: {out.strip()[-400:]}", file=sys.stderr)
@@ -172,11 +176,18 @@ def apply(name):
     time.sleep(5)
     rc, out = sh(["docker", "inspect", name, "--format", "{{.State.Status}}"])
     status = out.strip() if rc == 0 else "unknown"
-    clear(pending_path(name))
-    clear(skipped_path(name))
     if status != "running":
         print(f"ERROR: {name} recreated but state is '{status}', not running", file=sys.stderr)
         return 1
+    # Running is not enough: confirm it is on the image its tag now points at.
+    ref = image_ref_of_container(name)
+    want, have = (local_image_id(ref) if ref else None), image_id_of_container(name)
+    if want and have != want:
+        print(f"ERROR: {name} is running but still on {str(have)[:19]}, not {want[:19]}",
+              file=sys.stderr)
+        return 1
+    clear(pending_path(name))
+    clear(skipped_path(name))
     print(f"[OK] {name} updated and running" +
           (f" (with {', '.join(NETNS_SIBLINGS)})" if name == "gluetun" else ""))
     return 0
@@ -197,7 +208,7 @@ def dump_nextcloud_db():
 
 
 def auto():
-    check()
+    check(auto=True)
     failed = 0
     for compose_dir, services in STACK_SERVICES.items():
         for name in services:
@@ -219,9 +230,8 @@ def auto():
             # Roll back: point the tag at the old image again and recreate.
             ref, old_id = pend.get("image_ref"), pend.get("old_image_id")
             if ref and old_id and sh(["docker", "tag", old_id, ref])[0] == 0:
-                force = ["--force-recreate"] if name == "gluetun" else []
                 ups = ["gluetun"] + NETNS_SIBLINGS if name == "gluetun" else [name]
-                sh(["docker", "compose", "up", "-d", "--no-deps", *force, *ups],
+                sh(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", *ups],
                    cwd=compose_dir, timeout=300)
                 write_json(skipped_path(name), {"skipped_image_id": pend.get("new_image_id"),
                                                 "skipped_at": time.time(), "reason": "auto-rollback"})
