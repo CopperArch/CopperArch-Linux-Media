@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.21 - 2026-11-16
+- qBittorrent peer check: restart DHT on heal, one alert per outage (#34)
+
 ## 0.10.20 - 2026-11-15
 - Container updates: force the recreate and check the new image is running (#33)
 
