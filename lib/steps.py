@@ -42,6 +42,7 @@ def base_packages(ctx: Ctx) -> list[str]:
         need += ["tkinter", "xrandr", "tmux"]
     if ctx.profile.use_daily_routine:
         need += ["smartmontools", "ncdu", "pkg-tools", "clamav", "freshclam", "rkhunter"]
+        need += ["ffmpeg", "fonts-dejavu"]   # Jellyfin poster badges
     if ctx.profile.use_local_glm:
         need += ["zstd"]     # ollama's install.sh unpacks a .tar.zst
     if ctx.profile.media_pool and "mergerfs" not in ctx.profile.media_pool:

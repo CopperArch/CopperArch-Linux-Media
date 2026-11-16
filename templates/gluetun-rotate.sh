@@ -215,3 +215,7 @@ fi
 # torrent stuck in metaDL); the self-heal peer check rebinds it if so.
 sleep 30
 python3 "${HOME}/.local/bin/media-stack-selfheal.py" --qbit-peers >> "$LOG" 2>&1 || true
+
+# Poster badges: "CAM" on cam grabs (removed once Radarr upgrades) + IMDb
+# rating star on every movie/series poster (2026-11-16).
+python3 "${HOME}/.local/bin/media-stack-selfheal.py" --poster-badges >> "$LOG" 2>&1 || true
