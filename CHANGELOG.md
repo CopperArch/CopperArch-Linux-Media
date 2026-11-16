@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.22 - 2026-11-16
+- Jellyfin poster badges (CAM + IMDb rating); stop shipping API keys (#35)
+
 ## 0.10.21 - 2026-11-16
 - qBittorrent peer check: restart DHT on heal, one alert per outage (#34)
 
