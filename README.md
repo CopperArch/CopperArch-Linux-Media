@@ -254,7 +254,8 @@ the stack as `.env.bak-<date>`.
    60-day cap so a hard-pinned tag or a remembered-bad image is never
    skipped forever), and runs `media-stack-selfheal.py` (qBittorrent queue +
    dead-torrent recovery, plus a peer check that rebinds qBittorrent's port
-   when a VPN reconnect leaves it with 0 DHT nodes and every torrent stuck —
+   and restarts its DHT when a VPN reconnect leaves it with 0 DHT nodes and
+   every torrent stuck (one alert email per outage, one on recovery) —
    also run after each hourly rotation — and English-only audio: any release
    with a non-English audio track is rejected in every Sonarr/Radarr
    profile, with an English-dub fallback: a foreign-original title still
