@@ -302,7 +302,12 @@ the stack as `.env.bak-<date>`.
    franchise data via Radarr; movies Jellyfin couldn't identify are matched
    by cleaned-up title only when an independent IMDb search agrees), keeps
    Plex's automatic collections on, and actually fetches every poster in
-   both apps, re-fetching broken ones. Files with no TMDB franchise can be
+   both apps, re-fetching broken ones. Jellyfin posters also get badges
+   burned into the image, so TV apps show them too: a red **CAM** tag on
+   movies whose Radarr file is a cam/telesync early release (the clean
+   poster comes back once Radarr upgrades it) and a yellow ★ with the
+   IMDb rating (IMDb's daily ratings dataset) on every movie and series.
+   Files with no TMDB franchise can be
    grouped by hand in `~/.config/media-library/manual-collections.json`
    (collection name → pieces of file names, plus optional title fixes),
    which is re-applied to both apps every night. A disk-space step removes

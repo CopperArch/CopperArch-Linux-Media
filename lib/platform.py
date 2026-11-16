@@ -43,6 +43,11 @@ class Platform:
         "xrandr":        ("x11-xserver-utils",      "xrandr",              "xorg-xrandr",    "xrandr"),
         "tmux":          ("tmux",                   "tmux",                "tmux",           "tmux"),
         "zstd":          ("zstd",                   "zstd",                "zstd",           "zstd"),
+        # Jellyfin poster badges (CAM tag + IMDb rating) are drawn with
+        # ffmpeg drawtext in DejaVu Sans Bold. Fedora's main repos carry
+        # ffmpeg-free; openSUSE's full ffmpeg is Packman-only (badges skip).
+        "ffmpeg":        ("ffmpeg",                 "ffmpeg-free",         "ffmpeg",         None),
+        "fonts-dejavu":  ("fonts-dejavu-core",      "dejavu-sans-fonts",   "ttf-dejavu",     "dejavu-fonts"),
         # nightly malware + rootkit scans (intrusion-check.py); rkhunter is
         # AUR-only on Arch and not in openSUSE's main repos
         "clamav":        ("clamav",                 "clamav",              "clamav",         "clamav"),
