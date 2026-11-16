@@ -306,7 +306,8 @@ the stack as `.env.bak-<date>`.
    burned into the image, so TV apps show them too: a red **CAM** tag on
    movies whose Radarr file is a cam/telesync early release (the clean
    poster comes back once Radarr upgrades it) and a yellow ★ with the
-   IMDb rating (IMDb's daily ratings dataset) on every movie and series.
+   IMDb rating (IMDb's daily ratings dataset) on every movie, series and
+   season (seasons show their series' rating).
    Files with no TMDB franchise can be
    grouped by hand in `~/.config/media-library/manual-collections.json`
    (collection name → pieces of file names, plus optional title fixes),
