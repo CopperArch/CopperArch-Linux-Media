@@ -258,9 +258,11 @@ the stack as `.env.bak-<date>`.
    every torrent stuck (one alert email per outage, one on recovery) —
    also run after each hourly rotation — and English-only audio: any release
    with a non-English audio track is rejected in every Sonarr/Radarr
-   profile, with an English-dub fallback: a foreign-original title still
-   missing 6 hours after it was added or aired gets its best DUAL/English-dub
-   release instead, so it is not stuck forever). Everything else (Immich, Portainer, Tugtainer, WatchState,
+   profile (Radarr profiles use language "Any" so explicit English dubs —
+   DUBBED/ENG, never DUAL/MULTI — of foreign films are allowed), with an
+   English-dub fallback: a foreign-original title still missing 6 hours after
+   it was added or aired gets its best English-dub release, even with few
+   seeders, so it is not stuck forever). Everything else (Immich, Portainer, Tugtainer, WatchState,
    Caddy, gluetun, Prowlarr's own dependency `flaresolverr`) is updated
    nightly by `docker-update-gate.py auto`: a database dump before any
    Nextcloud DB update, gluetun recreated together with every container
