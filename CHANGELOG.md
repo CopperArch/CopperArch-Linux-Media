@@ -9,6 +9,9 @@ patch number from `.github/workflows/bump-version.yml`, which also adds the
 change to this file. A pull request that edits `VERSION` itself (for a bigger
 jump) is left as it is.
 
+## 0.10.25 - 2026-11-26
+- Self-heal: find and replace black Jellyfin posters/episode thumbnails nightly (#38)
+
 ## 0.10.24 - 2026-11-20
 - English-only: allow explicit English dubs, stop trusting DUAL releases (#37)
 
