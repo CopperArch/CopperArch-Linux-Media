@@ -310,6 +310,11 @@ the stack as `.env.bak-<date>`.
    poster comes back once Radarr upgrades it) and a yellow ★ with the
    IMDb rating (IMDb's daily ratings dataset) on every movie, series and
    season (seasons show their series' rating).
+   Posters and episode thumbnails that come out **black** (usually a black
+   `-thumb.jpg` shipped with the download, which Jellyfin prefers over the
+   online artwork) are found every night: the black file is moved to
+   `recycle-bin/black-thumbs/` on the media pool and the real artwork is
+   fetched; episodes with nothing online get a frame from their own video.
    Files with no TMDB franchise can be
    grouped by hand in `~/.config/media-library/manual-collections.json`
    (collection name → pieces of file names, plus optional title fixes),
